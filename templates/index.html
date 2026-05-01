@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DOC-ANON</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+<main>
+
+  <header class="app-header">
+    <span class="title">DOC-ANON</span>
+    <span class="ver">v1.3</span>
+  </header>
+
+  <!-- ============================================
+       STATUS BAR
+       ============================================ -->
+  <section class="status-bar" id="status-bar" aria-label="Endpoint status">
+    <span class="lbl">&gt;&nbsp;ENDPOINT:</span>
+    <span class="name" id="status-name">-</span>
+    <span class="model" id="status-model"></span>
+    <span class="dot unk" id="status-dot" aria-label="endpoint status"></span>
+    <span class="grow"></span>
+    <select id="endpoint-select" aria-label="active endpoint"></select>
+    <button type="button" class="btn secondary sm" id="btn-toggle-endpoints">[ MANAGE ENDPOINTS ]</button>
+    <button type="button" class="btn secondary sm" id="btn-toggle-github">[ MANAGE GITHUB ]</button>
+    <button type="button" class="btn secondary sm" id="btn-toggle-theme">[ DARK ]</button>
+  </section>
+
+  <!-- ============================================
+       ENDPOINT MANAGER PANEL
+       ============================================ -->
+  <section class="panel hidden" id="panel-endpoints">
+    <h3>[ ENDPOINTS ]</h3>
+    <div id="endpoints-rows"></div>
+    <div style="margin-top: 12px; display: flex; gap: 8px;">
+      <button type="button" class="btn secondary sm" id="btn-add-endpoint">[ + ADD ENDPOINT ]</button>
+      <button type="button" class="btn secondary sm" id="btn-recheck-endpoints">[ RECHECK ALL ]</button>
+    </div>
+
+    <form class="form hidden" id="form-endpoint">
+      <label for="ep-nick">NICKNAME</label>
+      <input type="text" id="ep-nick" name="nickname" required />
+      <label for="ep-url">BASE URL</label>
+      <input type="url" id="ep-url" name="base_url" required placeholder="http://localhost:11434" />
+      <label>API STYLE</label>
+      <div class="radios">
+        <label><input type="radio" name="api_style" value="ollama" checked /> OLLAMA</label>
+        <label><input type="radio" name="api_style" value="openai" /> OPENAI-COMPAT</label>
+      </div>
+      <label for="ep-model">MODEL</label>
+      <input type="text" id="ep-model" name="model" required placeholder="llama3.2" />
+      <label for="ep-chunk">CHUNK TOKENS</label>
+      <input type="number" id="ep-chunk" name="chunk_tokens" value="2000" min="200" max="32000" />
+      <div class="warn hidden" id="ep-warn">[!] non-local URL detected. This may send your document to an external server. Confirm to save.</div>
+      <div class="form-actions">
+        <button type="button" class="btn secondary sm" id="btn-test-endpoint">[ TEST ]</button>
+        <button type="submit" class="btn sm" id="btn-save-endpoint">[ SAVE ]</button>
+        <button type="button" class="btn secondary sm" id="btn-cancel-endpoint">[ CANCEL ]</button>
+        <input type="hidden" id="ep-id" name="id" />
+      </div>
+    </form>
+  </section>
+
+  <!-- ============================================
+       GITHUB MANAGER PANEL
+       ============================================ -->
+  <section class="panel hidden" id="panel-github">
+    <h3>[ GITHUB CONNECTIONS ]</h3>
+    <div id="github-rows"></div>
+    <div style="margin-top: 12px;">
+      <button type="button" class="btn secondary sm" id="btn-add-github">[ + ADD CONNECTION ]</button>
+    </div>
+
+    <form class="form hidden" id="form-github">
+      <label for="gh-nick">NICKNAME</label>
+      <input type="text" id="gh-nick" name="nickname" required />
+      <label for="gh-repo">REPO</label>
+      <input type="text" id="gh-repo" name="repo" required placeholder="owner/repo" />
+      <label for="gh-branch">BRANCH</label>
+      <input type="text" id="gh-branch" name="branch" value="main" />
+      <label for="gh-path">DEST PATH</label>
+      <input type="text" id="gh-path" name="path" placeholder="(repo root)" />
+      <label for="gh-token">PAT</label>
+      <input type="password" id="gh-token" name="token" placeholder="ghp_..." />
+      <div class="form-actions">
+        <button type="button" class="btn secondary sm" id="btn-test-github">[ TEST CONNECTION ]</button>
+        <button type="submit" class="btn sm" id="btn-save-github">[ SAVE ]</button>
+        <button type="button" class="btn secondary sm" id="btn-cancel-github">[ CANCEL ]</button>
+        <input type="hidden" id="gh-id" name="id" />
+      </div>
+    </form>
+  </section>
+
+  <!-- ============================================
+       MODE TABS
+       ============================================ -->
+  <nav class="tabs" role="tablist" aria-label="mode">
+    <button type="button" class="tab active" id="tab-anonymize" role="tab" aria-selected="true">[ ANONYMIZE ]</button>
+    <button type="button" class="tab" id="tab-unanonymize" role="tab" aria-selected="false">[ UNANONYMIZE ]</button>
+  </nav>
+
+  <!-- ============================================
+       ANONYMIZE FLOW
+       ============================================ -->
+  <section id="mode-anonymize">
+    <div class="section-label">FILE</div>
+    <label class="dropzone" id="dropzone">
+      <div>&gt; DROP FILE HERE</div>
+      <div class="sub">&nbsp;&nbsp;or [ BROWSE ]</div>
+      <input type="file" id="file-input" />
+    </label>
+
+    <div class="section-label">PII TYPES</div>
+    <button type="button" class="btn block" id="btn-sanitize-all">[ SANITIZE ALL ]</button>
+    <div style="height: 12px;"></div>
+    <div class="pii-grid" id="pii-grid">
+      {% for tag in valid_tags %}
+      <label class="pii-row">
+        <span class="tag">{{ tag }}</span>
+        <span class="label" data-tag="{{ tag }}"></span>
+        <span class="check-cell"></span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div style="height: 22px;"></div>
+    <button type="button" class="btn block" id="btn-detect" disabled>[ DETECT PII ]</button>
+
+    <div class="section-label hidden" id="lbl-detection">DETECTION</div>
+    <div class="progress hidden" id="progress-detection"></div>
+
+    <div class="section-label hidden" id="lbl-preview">PREVIEW - REVIEW BEFORE SCRUB</div>
+    <div class="hidden" id="block-preview">
+      <div class="preview-summary">
+        <span><b>DETECTED:</b> <span id="prev-entities">0</span> entities</span>
+        <span><b>REPLACEMENTS:</b> <span id="prev-replacements">0</span></span>
+        <span><b>TYPES:</b> <span id="prev-types">-</span></span>
+      </div>
+      <div class="preview-body" id="preview-body"></div>
+      <div class="preview-actions">
+        <button type="button" class="btn" id="btn-confirm">[ CONFIRM AND SCRUB ]</button>
+        <button type="button" class="btn secondary" id="btn-cancel">[ CANCEL ]</button>
+        <span class="grow"></span>
+        <span class="preview-hint">Click any placeholder to deselect a false positive</span>
+      </div>
+    </div>
+
+    <div class="section-label hidden" id="lbl-scrub">SCRUB &amp; VERIFY</div>
+    <div class="progress hidden" id="progress-scrub"></div>
+
+    <div class="section-label hidden" id="lbl-results">RESULTS</div>
+    <div class="hidden" id="block-results">
+      <div class="results" id="results-table"></div>
+      <div class="actions">
+        <button type="button" class="btn" id="btn-dl-file" disabled>[ DOWNLOAD FILE ]</button>
+        <button type="button" class="btn" id="btn-dl-key" disabled>[ DOWNLOAD KEY ]</button>
+        <button type="button" class="btn secondary" id="btn-view-text" disabled>[ VIEW ON SCREEN ]</button>
+        <button type="button" class="btn secondary" id="btn-push-github" disabled>[ PUSH TO GITHUB ]</button>
+      </div>
+
+      <!-- Anonymized text panel (opens on VIEW ON SCREEN) -->
+      <div class="hidden" id="block-screen-text">
+        <div class="section-label" style="margin-top: 22px;">ANONYMIZED TEXT</div>
+        <div class="preview-summary">
+          <span class="muted">Read-only. Re-extracted from the verified output. Safe to copy / paste anywhere - all PII has been replaced.</span>
+        </div>
+        <textarea id="screen-text" class="screen-text" readonly aria-label="anonymized text"></textarea>
+        <div class="preview-actions">
+          <button type="button" class="btn sm" id="btn-copy-text">[ COPY ALL ]</button>
+          <button type="button" class="btn secondary sm" id="btn-hide-text">[ HIDE ]</button>
+          <span class="grow"></span>
+          <span class="preview-hint" id="screen-text-meta"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- GitHub push panel -->
+    <div class="panel hidden" id="panel-push">
+      <h3>[ PUSH TO GITHUB ]</h3>
+      <div class="form">
+        <label for="push-conn">CONNECTION</label>
+        <select id="push-conn"></select>
+        <label for="push-branch">BRANCH</label>
+        <input type="text" id="push-branch" />
+        <label for="push-path">DEST PATH</label>
+        <input type="text" id="push-path" placeholder="(repo root)" />
+        <div class="form-actions">
+          <button type="button" class="btn sm" id="btn-do-push">[ PUSH FILE ]</button>
+          <button type="button" class="btn secondary sm" id="btn-close-push">[ CLOSE ]</button>
+        </div>
+      </div>
+      <div id="push-result" class="muted" style="font-size: 12px;"></div>
+    </div>
+  </section>
+
+  <!-- ============================================
+       UNANONYMIZE FLOW
+       ============================================ -->
+  <section id="mode-unanonymize" class="hidden">
+    <div class="section-label">ANONYMIZED FILE</div>
+    <label class="dropzone" id="dropzone-unanon">
+      <div>&gt; DROP ANONYMIZED FILE HERE</div>
+      <div class="sub">&nbsp;&nbsp;or [ BROWSE ]</div>
+      <input type="file" id="unanon-file-input" />
+    </label>
+
+    <div class="section-label">KEY FILE</div>
+    <label class="dropzone" id="dropzone-key">
+      <div>&gt; DROP KEY FILE HERE</div>
+      <div class="sub">&nbsp;&nbsp;or [ BROWSE ]</div>
+      <input type="file" id="key-file-input" accept=".json" />
+    </label>
+
+    <div style="height: 22px;"></div>
+    <button type="button" class="btn block" id="btn-unanonymize" disabled>[ RUN UNANONYMIZE ]</button>
+    <div id="unanon-result" class="muted" style="font-size: 12px; margin-top: 12px;"></div>
+  </section>
+
+  <!-- ============================================
+       LOG PANEL
+       ============================================ -->
+  <div class="section-label" style="margin-top: 32px;">LOG</div>
+  <div class="log">
+    <div class="head">
+      <span class="title">[ LOG ]</span>
+      <span class="grow"></span>
+      <button type="button" class="btn secondary sm" id="btn-copy-log">[ COPY LOG ]</button>
+      <button type="button" class="btn secondary sm" id="btn-refresh-log" style="margin-left: 4px;">[ REFRESH ]</button>
+    </div>
+    <div class="body" id="log-body"></div>
+  </div>
+
+</main>
+
+<!-- Bootstrap data the JS needs to render PII rows + format notes. -->
+<script id="bootstrap-data" type="application/json">
+{
+  "supported_extensions": {{ supported_extensions | tojson }},
+  "output_notes": {{ output_notes | tojson }},
+  "valid_tags": {{ valid_tags | tojson }},
+  "libreoffice": {{ libreoffice | tojson }}
+}
+</script>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

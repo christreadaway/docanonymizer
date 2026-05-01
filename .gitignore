@@ -1,0 +1,29 @@
+# Doc Anonymizer ignores
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime data - user files, secrets, logs
+uploads/
+output/
+keys/
+anonymizer.log
+endpoints.json
+github.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+.coverage
+htmlcov/
+test-output/

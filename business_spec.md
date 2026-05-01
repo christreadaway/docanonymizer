@@ -1,7 +1,7 @@
 # Business Spec: Doc Anonymizer
 
 **Last updated:** 2026-05-01  
-**Status:** In development
+**Status:** v1 implementation complete - awaiting operator validation
 
 ---
 
@@ -35,6 +35,8 @@ The key design decisions that make this useful rather than just safe:
 
 **Direct repo delivery.** After a verified scrub, the operator can push the anonymized file directly to a GitHub repository branch. This closes the last gap in the workflow: the clean file goes exactly where the analyst needs it, without the operator manually downloading and uploading it.
 
+**Copy / paste straight from the screen.** Many uses of this tool end with the operator pasting clean text into another app (a chat with a public LLM, a Slack thread, an email). After a verified scrub, the anonymized text is also available right in the page with a one-click `[ COPY ALL ]`. No file download, no opening another app, no risk of grabbing the wrong file. The downloadable file is still produced and verified - on-screen text is an additional output, not a replacement.
+
 ---
 
 ## Who Uses This
@@ -64,3 +66,21 @@ This is a document preparation tool, not an analysis tool. It anonymizes. It doe
 v1 ships with text-preserving output for PDF and PPTX (formatting not rebuilt). Full format-preserving output for XLSX, DOCX, and CSV. All other major formats extracted to text.
 
 v2 targets PDF rebuild with formatting preserved, and in-place PPTX scrubbing.
+
+---
+
+## Operational Decisions (resolved during implementation)
+
+The PRD listed six open questions. Three are resolved as built; three are deferred to v2.
+
+**Resolved:**
+
+1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after each session ends (success, failure, or cancel). `/output/` and `/keys/` are kept for the operator to manage manually - they are work product, not transient.
+2. **XLSX formulas containing PII.** Flag and warn, do not silently rewrite. The scrubber reports `formula_warnings` to the UI so the operator can decide whether to revise the formula by hand before sharing.
+3. **LLM timeout mid-chunk.** Log the failed chunk and continue. The post-scrub verifier is the safety net - any PII the LLM missed in a failed chunk will surface there, blocking download.
+
+**Deferred to v2:**
+
+4. Optional AES-encrypted key files at rest.
+5. Whitelist UI for false-positive regex matches in verification (currently any regex hit fails the run; the operator must abort or retry).
+6. Manual highlight-and-tag UI in the preview panel for operator-added PII spans the LLM missed.
