@@ -85,15 +85,16 @@
     border-radius: 2px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.06);
     overflow: hidden;
-    width: 1100px; height: 780px;
+    width: 1100px; min-height: 780px; height: auto;
     background: #fff;
   }
 
   /* ---------- Browser chrome ---------- */
-  .chrome { display: flex; flex-direction: column; height: 100%;
+  .chrome { display: flex; flex-direction: column;
     background: var(--chrome-tab-bg);
     border-radius: 10px; overflow: hidden;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.1);
+    min-height: 780px;
   }
   .chrome-tabbar {
     display: flex; align-items: center; height: 44px;
@@ -148,14 +149,14 @@
     flex: 1; color: var(--chrome-text); font-size: 13px;
     font-family: system-ui, sans-serif;
   }
-  .chrome-body { flex: 1; background: #fff; overflow: hidden; }
+  .chrome-body { flex: 1 0 auto; background: #fff; overflow: visible; display: flex; }
 
   /* ---------- DocAnon app body ---------- */
   .da-app {
     background: var(--bg-primary); color: var(--text-primary);
-    height: 100%; min-height: 100%;
     font-family: var(--mono);
-    overflow: hidden;
+    flex: 1 0 auto;
+    width: 100%;
   }
   .da-inner { max-width: 760px; margin: 0 auto; padding: 24px 24px 32px; }
 
@@ -174,15 +175,17 @@
 
   /* ---------- Status bar ---------- */
   .da-status {
-    display: flex; align-items: center; gap: 12px;
+    display: flex; flex-wrap: wrap; align-items: center;
+    column-gap: 10px; row-gap: 8px;
     padding: 10px 14px;
     background: var(--bg-surface); border: 1px solid var(--border);
     font-family: var(--mono); font-size: 13px;
   }
-  .da-status .lbl { color: var(--text-secondary); }
-  .da-status .name { color: var(--text-primary); }
-  .da-status .model { color: var(--text-secondary); }
-  .da-status .grow { flex: 1; }
+  .da-status > * { flex-shrink: 0; }
+  .da-status .lbl { color: var(--text-secondary); white-space: nowrap; }
+  .da-status .name { color: var(--text-primary); white-space: nowrap; }
+  .da-status .model { color: var(--text-secondary); white-space: nowrap; }
+  .da-status .grow { flex: 1 1 auto; }
   .da-status select {
     background: var(--bg-inset); color: var(--text-primary);
     border: 1px solid var(--border);
@@ -190,8 +193,12 @@
     font-family: var(--mono); font-size: 12px;
     appearance: none; -webkit-appearance: none; border-radius: 0;
     background-image: none;
+    max-width: 180px;
   }
-  .da-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .da-dot {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; flex-shrink: 0;
+  }
   .da-dot.ok { background: var(--success); }
   .da-dot.err { background: var(--danger); }
 
@@ -206,7 +213,7 @@
     background: var(--accent-bg); color: var(--accent-fg);
     white-space: nowrap;
   }
-  .da-btn.sm { height: 32px; padding: 0 14px; font-size: 13px; }
+  .da-btn.sm { height: 32px; padding: 0 10px; font-size: 12px; }
   .da-btn.block { width: 100%; }
   .da-btn.secondary {
     background: transparent; color: var(--text-primary);
@@ -219,6 +226,13 @@
   .da-btn[disabled] {
     background: var(--bg-inset); color: var(--text-dim);
     border: 1px solid var(--border); cursor: not-allowed;
+  }
+  /* Focus states per PRD 12.3 */
+  .da-btn:focus-visible,
+  .da-status select:focus-visible,
+  .da-tab:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 1px;
   }
 
   /* ---------- Tabs ---------- */
@@ -386,8 +400,12 @@
     background: var(--bg-inset); border: 1px solid var(--border);
     padding: 14px;
     font-family: var(--mono); font-size: 13px; line-height: 1.7;
-    white-space: pre; color: var(--text-primary);
+    color: var(--text-primary);
   }
+  /* Per-row pre prevents template-literal whitespace between div siblings
+     from rendering as blank lines while still preserving padEnd alignment
+     inside each row. */
+  .da-results > div { white-space: pre; }
   .da-results .rule { color: var(--text-dim); }
   .da-results .verified { color: var(--success); }
   .da-results .failed { color: var(--danger); }
@@ -455,9 +473,9 @@
         <span class="da-dot ok"></span>
         <span class="grow"></span>
         <select><option>Ollama (local)</option></select>
-        <button class="da-btn secondary sm">[ MANAGE ENDPOINTS ]</button>
-        <button class="da-btn secondary sm">[ MANAGE GITHUB ]</button>
-        <button class="da-btn secondary sm">[ DARK ]</button>
+        <button type="button" class="da-btn secondary sm">[ MANAGE ENDPOINTS ]</button>
+        <button type="button" class="da-btn secondary sm">[ MANAGE GITHUB ]</button>
+        <button type="button" class="da-btn secondary sm">[ DARK ]</button>
       </div>
     `;
   }
@@ -543,7 +561,7 @@
         <div class="head">
           <span class="title">[ LOG ]</span>
           <span class="grow"></span>
-          <button class="da-btn secondary sm">[ COPY LOG ]</button>
+          <button type="button" class="da-btn secondary sm">[ COPY LOG ]</button>
         </div>
         <div class="body">${body}</div>
       </div>
@@ -623,11 +641,11 @@
       ${dropZoneEmpty()}
       <div class="gap-22"></div>
       <div class="da-section-label">PII TYPES</div>
-      <button class="da-btn block">[ SANITIZE ALL ]</button>
+      <button type="button" class="da-btn block">[ SANITIZE ALL ]</button>
       <div class="gap-12"></div>
       ${piiGrid()}
       <div class="gap-22"></div>
-      <button class="da-btn block" disabled>[ DETECT PII ]</button>
+      <button type="button" class="da-btn block" disabled>[ DETECT PII ]</button>
     `);
   }
 
@@ -644,11 +662,11 @@
       ${dropZoneLoaded('donor_list.xlsx', '312.4 KB · XLSX · OUTPUT: .xlsx (formatting preserved)')}
       <div class="gap-22"></div>
       <div class="da-section-label">PII TYPES</div>
-      <button class="da-btn block">[ SANITIZE ALL ]</button>
+      <button type="button" class="da-btn block">[ SANITIZE ALL ]</button>
       <div class="gap-12"></div>
       ${piiGrid()}
       <div class="gap-22"></div>
-      <button class="da-btn block">[ DETECT PII ]</button>
+      <button type="button" class="da-btn block">[ DETECT PII ]</button>
     `);
   }
 
@@ -709,8 +727,8 @@
       <div class="da-preview-body">${previewBody}</div>
       <div class="gap-18"></div>
       <div class="da-preview-actions">
-        <button class="da-btn">[ CONFIRM AND SCRUB ]</button>
-        <button class="da-btn secondary">[ CANCEL ]</button>
+        <button type="button" class="da-btn">[ CONFIRM AND SCRUB ]</button>
+        <button type="button" class="da-btn secondary">[ CANCEL ]</button>
         <span class="grow"></span>
         <span class="da-preview-hint">Click any placeholder to deselect a false positive</span>
       </div>
@@ -764,9 +782,9 @@
       ${results(true)}
       <div class="gap-18"></div>
       <div class="da-actions">
-        <button class="da-btn">[ DOWNLOAD FILE ]</button>
-        <button class="da-btn">[ DOWNLOAD KEY ]</button>
-        <button class="da-btn secondary">[ PUSH TO GITHUB ]</button>
+        <button type="button" class="da-btn">[ DOWNLOAD FILE ]</button>
+        <button type="button" class="da-btn">[ DOWNLOAD KEY ]</button>
+        <button type="button" class="da-btn secondary">[ PUSH TO GITHUB ]</button>
       </div>
       <div class="gap-22"></div>
       <div class="da-section-label">LOG</div>

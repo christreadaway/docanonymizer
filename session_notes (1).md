@@ -96,3 +96,54 @@ External network policy clarified: LLM endpoints must be localhost or LAN. GitHu
 Two open questions added: (5) verification false positive whitelist workflow; (6) manual span tagging in preview panel.
 
 PRD is v1.3 final. All files updated. Spec is complete and ready for Claude Code.
+
+---
+
+## Session 002 - 2026-05-01 (Claude Code, branch `claude/implement-screens-design-Wvu9O`)
+
+**Type:** Implementation - first code session. Materialized the screens design from the Claude Design handoff bundle.
+
+### What Was Built
+
+`screens.html` at the repo root. A single static page that renders all six artboards from the design handoff (Anonymize happy path: Empty -> File loaded -> Detecting -> Preview -> Scrubbing -> Verified) at 1100px artboard width with macOS browser chrome around each. The dark mode terminal aesthetic is applied throughout, drawing color tokens from PRD 12.2 and the button/typography rules from CLAUDE.md and PRD 12.3-12.4.
+
+The original handoff prototype was React + UMD CDN. That stack violates CLAUDE.md's rule "Single HTML page, vanilla JS, no external CSS frameworks or CDNs," so it was rewritten in vanilla HTML/CSS/JS (no React, no Babel, no CDN). Visual output is reproduced; the prototype's pan/zoom design canvas chrome (rename, drag-reorder, focus mode) was intentionally omitted - those are design tool affordances, not part of the app.
+
+### Decisions and Assumptions
+
+- **Artboard sizing.** Prototype hardcoded each artboard to 1100x780 with internally scrolling content. For a static page where focus mode does not exist, content cropping is a real UX bug. Switched to `min-height: 780px; height: auto` so each card grows to fit its content. Width stays at 1100px to preserve the design intent.
+- **Status bar layout.** The status bar's content (endpoint label + dropdown + 3 secondary buttons) does not fit in 760px even with shrunk paddings. Allowed the status bar to wrap to 2 rows via `flex-wrap: wrap`; flagged below as something to revisit.
+- **`[DARK]` toggle placement.** Prototype puts it in the status bar; PRD 12.4 says it goes in the header bar. Followed the prototype since the user's instruction was to implement the design. The PRD-vs-prototype divergence is noted; pick a side when the real toggle is wired up.
+- **Browser chrome inclusion.** Kept the chrome wrapper from the prototype because the design intentionally frames each screen as a localhost browser session. This is design language, not a real implementation detail; the eventual Flask app's HTML will not include chrome.
+
+### Bugs Found and Fixed (this session)
+
+Comprehensive headless test pass with Playwright revealed six bugs across the implementation. All fixed before commit.
+
+1. **Critical** - status dot collapsed to 0 width. Default flex `min-width: auto` shrank the 10x10 dot to invisible. Fix: `flex-shrink: 0` on `.da-dot`.
+2. **High** - "Ollama (local)" wrapped to two lines under flex squeeze. Fix: `white-space: nowrap` on status-bar text spans plus `flex-shrink: 0` on all status-bar children.
+3. **High** - status bar buttons overflowed past the right edge of the 760px content area. Fix: reduced sm-button padding (14 -> 10) and font (13 -> 12), added `flex-wrap: wrap` so any remaining overflow falls to a second row inside the status bar background instead of overhanging.
+4. **Medium** - all six artboards cropped content at the bottom because the card was a hard 780px and the chrome body had `overflow: hidden`. Fix: `min-height: 780px; height: auto` on `.dc-card`, `overflow: visible` and flex chain on the chrome body so the wrapper grows with its child.
+5. **Low** - results panel had multi-line vertical gaps between rows. Cause: `white-space: pre` on `.da-results` rendered the template literal's formatting whitespace between sibling divs as visible blank lines. Fix: scoped `white-space: pre` to direct child rows only.
+6. **Low** - missing focus states (PRD 12.3 mandates `outline: 2px solid var(--border-focus)`); buttons defaulted to `type=submit`. Fix: added `:focus-visible` rules; added `type="button"` to every button.
+
+### Tests Run
+
+- Playwright headless render of all six artboards in Chromium, full-page screenshots to `/tmp/screen-{1..6}.png`. Manual visual review against the prototype.
+- Per-screen structural assertions (artboard count, status bar present, tabs present, primary/disabled button counts, progress steps, log lines, PII rows, placeholders, verified line text).
+- Console error / page error capture: zero errors after fixes.
+- WCAG AA contrast spot-check: all measured text/background pairs at 5.92:1 or higher; primary buttons and active tabs at 21:1 (well past AAA).
+- Keyboard focus check: first Tab focuses the endpoint select with the spec'd 2px white outline.
+- Disabled-button click test: disabled `[ DETECT PII ]` correctly blocks click events.
+
+### Open Issues / Known Limitations
+
+- Status bar wraps to a second row at 760px width. Acceptable for a design mock; if/when the real header is built, either trim the bar's content or move `[ DARK ]` to the header per PRD 12.4.
+- The screens are static art: no upload, detection, scrub, or unanonymize behavior is wired. This is intentional - the design canvas is a visual deliverable for the operator to react to before implementation begins.
+- File names from the upload (`CLAUDE (1).md`, `business_spec (1).md`, `session_notes (1).md`, `doc-anonymizer-prd.md`) carry the `(1)` artifact from the original upload. Worth normalizing in a future cleanup commit.
+
+### Next Steps
+
+- Operator review of `screens.html` to confirm the screen flow and visual direction before any backend work begins.
+- Once approved, scaffold the Flask skeleton from PRD 11 and wire the screens into Jinja templates (or keep them as a static reference and rebuild equivalent markup behind the Flask routes).
+- Decide the `[ DARK ]` toggle placement and reconcile the prototype/PRD divergence.
