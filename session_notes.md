@@ -140,7 +140,7 @@ Comprehensive headless test pass with Playwright revealed six bugs across the im
 
 - Status bar wraps to a second row at 760px width. Acceptable for a design mock; if/when the real header is built, either trim the bar's content or move `[ DARK ]` to the header per PRD 12.4.
 - The screens are static art: no upload, detection, scrub, or unanonymize behavior is wired. This is intentional - the design canvas is a visual deliverable for the operator to react to before implementation begins.
-- File names from the upload (`CLAUDE (1).md`, `business_spec (1).md`, `session_notes (1).md`, `doc-anonymizer-prd.md`) carry the `(1)` artifact from the original upload. Worth normalizing in a future cleanup commit.
+- Filename cleanup: the `(1)` artifact from the original upload was dropped from `CLAUDE.md`, `business_spec.md`, and `session_notes.md` later in this same session.
 
 ### Next Steps
 
