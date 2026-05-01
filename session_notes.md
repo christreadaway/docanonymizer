@@ -237,3 +237,47 @@ Plus a Playwright headless run against the live Flask server: status bar populat
 - Operator runs the app against a real local LLM (Ollama/Llama 3.2) on a sample donor list and validates the detection quality.
 - Add a small fixture corpus to `tests/` (sanitized DOCX with tracked changes, sample XLSX with formulas, PDF with text) so the test suite exercises real document shapes, not only synthesized ones.
 - Wire up the `[ HOOKS ]` for resolving Open Questions 3 / 5 / 6 if the operator wants them in v2.
+
+---
+
+## Session 004 - 2026-05-01 (Claude Code, branch `claude/implement-screens-design-Wvu9O`)
+
+**Type:** Feature add - on-screen text output for copy / paste.
+
+### What Was Built
+
+A new `[ VIEW ON SCREEN ]` action in the Results panel. After a verified anonymize run, the operator can open an inline read-only textarea showing the anonymized text and `[ COPY ALL ]` it to the clipboard. The downloadable file and key file are still produced and verified - the screen view is an additional output that supports the most common downstream workflow (paste clean text into a chat, an email, or a public LLM) without the round trip through Downloads / a viewer app.
+
+### How It Works
+
+- `app/pipeline.py::anonymized_text(sess)` re-extracts the text from the verified output. For text-native formats (`.txt` / `.csv` / `.html` / `.rtf`) it reads the file directly; for binary formats (`.xlsx` / `.docx`) it routes through the existing extractor so the operator gets the readable text content.
+- `GET /api/anonymize/<sid>/text` returns `{text, char_count, filename}`. Same verification gate as the file download (`403` until `verify_result.passed`).
+- `templates/index.html` adds a `block-screen-text` panel with a `<textarea>`, `[ COPY ALL ]`, `[ HIDE ]`, and a metadata hint.
+- `static/app.js` wires the buttons. Copy uses `navigator.clipboard.writeText` with an `execCommand("copy")` fallback for offline / non-secure contexts. Visual feedback flips the button label to `[ COPIED ]` for 1.2s on success.
+- `static/styles.css` styles the textarea against the same dark/light tokens.
+
+### Decisions
+
+- **File still produced.** The screen view is additive, not a replacement. The deep-scrub guarantee (PRD 5.9) is anchored to a freshly built file, and the verifier reads from that file. Skipping file generation would weaken the guarantee. So the file is always built, verified, and offered for download; the screen view re-extracts from it.
+- **Re-extraction at view time.** The text returned to the screen comes from the *verified output file*, not from an in-memory transformation. That means whatever the operator copies is exactly what would be in the downloaded file - same source of truth.
+- **Verification gate enforced on the new endpoint.** The text endpoint refuses (403) until the verification pass succeeds, identical to the download endpoint. No bypass.
+- **Privacy.** No new external traffic. The text never leaves localhost (and even then, only inside the user's own browser session). The endpoint never logs document text - only `char_count` is logged via the wider request log.
+
+### Tests Run
+
+`pytest tests/` - **61/61 passing**. Three new server tests:
+
+1. `test_anonymize_view_text_returns_scrubbed_content` - end-to-end: upload txt, detect, scrub, verify, hit `/text`, assert PII string is gone and a `[PERSON_…]` placeholder is present.
+2. `test_anonymize_view_text_blocked_until_verified` - force a verify failure, hit `/text`, assert HTTP 403.
+3. `test_anonymize_view_text_xlsx_reextracts_cells` - XLSX upload + scrub + view: assert the text view contains placeholders (re-extracted from the binary output).
+
+Plus a Playwright live UI smoke run with a stand-in mock Ollama on port 11434 (a tiny `http.server` returning the canned LLM response). End-to-end: upload, detect, confirm, verify, click `[ VIEW ON SCREEN ]`, read the textarea value (`Hello [PERSON_EB17] - have a good day`), click `[ COPY ALL ]` and verify the button flips to `[ COPIED ]`, click `[ HIDE ]` and verify the panel collapses. Zero console errors.
+
+### Open Issues
+
+- The clipboard API requires a secure context in some browsers when served over HTTP. We have an `execCommand` fallback but Safari / older browsers may need an HTTPS reverse proxy (out of scope for v1 - this is a localhost dev tool).
+- The textarea has no character ceiling; very large outputs (50,000+ chars) will render fine but feel sluggish on copy. If that becomes a real issue, paginate or virtualize. Not seen in v1 testing.
+
+### Next Steps
+
+- Operator's call: should there be an option to *only* render to screen and skip the file output entirely? The trade-off is the deep-scrub / verification guarantee. Current call is "always build and verify a file even if the operator only wants screen text" because skipping it would mean inventing a parallel verification path. Easy to reconsider if the operator wants pure-text-only as a faster path for trusted small docs.

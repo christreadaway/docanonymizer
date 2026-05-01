@@ -35,6 +35,8 @@ The key design decisions that make this useful rather than just safe:
 
 **Direct repo delivery.** After a verified scrub, the operator can push the anonymized file directly to a GitHub repository branch. This closes the last gap in the workflow: the clean file goes exactly where the analyst needs it, without the operator manually downloading and uploading it.
 
+**Copy / paste straight from the screen.** Many uses of this tool end with the operator pasting clean text into another app (a chat with a public LLM, a Slack thread, an email). After a verified scrub, the anonymized text is also available right in the page with a one-click `[ COPY ALL ]`. No file download, no opening another app, no risk of grabbing the wrong file. The downloadable file is still produced and verified - on-screen text is an additional output, not a replacement.
+
 ---
 
 ## Who Uses This

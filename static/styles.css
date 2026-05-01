@@ -338,6 +338,25 @@ select {
 
 .actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 18px 0; }
 
+/* ---------- Anonymized text panel (copy / paste) ---------- */
+.screen-text {
+  width: 100%;
+  min-height: 240px;
+  max-height: 480px;
+  resize: vertical;
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 0;
+}
+.screen-text:focus { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
 /* ---------- Manager panels ---------- */
 .panel {
   background: var(--bg-inset); border: 1px solid var(--border);

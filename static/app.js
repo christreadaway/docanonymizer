@@ -624,7 +624,11 @@
 
     $("btn-dl-file").disabled = !verified;
     $("btn-dl-key").disabled = !verified;
+    $("btn-view-text").disabled = !verified;
     $("btn-push-github").disabled = !verified;
+    // Reset the view-on-screen panel for each new run.
+    hide($("block-screen-text"));
+    $("screen-text").value = "";
 
     if ((r.formula_warnings || []).length) {
       const w = create("div", { class: "note" }, [document.createTextNode(
@@ -652,6 +656,8 @@
     hide($("lbl-results"));
     hide($("block-results"));
     hide($("panel-push"));
+    hide($("block-screen-text"));
+    $("screen-text").value = "";
   }
 
   async function cancelSession() {
@@ -848,6 +854,38 @@
     });
     $("btn-dl-key").addEventListener("click", () => {
       window.location.href = `/api/anonymize/${state.sessionId}/download/key`;
+    });
+    $("btn-view-text").addEventListener("click", async () => {
+      if (!state.sessionId) return;
+      try {
+        const data = await api(`/api/anonymize/${state.sessionId}/text`);
+        $("screen-text").value = data.text;
+        $("screen-text-meta").textContent =
+          `${data.char_count.toLocaleString()} chars · re-extracted from ${data.filename}`;
+        show($("block-screen-text"));
+        $("screen-text").focus();
+        $("screen-text").select();
+      } catch (exc) {
+        alert(`Could not load text: ${exc.message}`);
+      }
+    });
+    $("btn-hide-text").addEventListener("click", () => hide($("block-screen-text")));
+    $("btn-copy-text").addEventListener("click", async () => {
+      const ta = $("screen-text");
+      ta.focus();
+      ta.select();
+      const text = ta.value;
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        try { ok = document.execCommand("copy"); } catch { ok = false; }
+      }
+      const btn = $("btn-copy-text");
+      const original = btn.textContent;
+      btn.textContent = ok ? "[ COPIED ]" : "[ COPY FAILED ]";
+      setTimeout(() => { btn.textContent = original; }, 1200);
     });
     $("btn-push-github").addEventListener("click", () => {
       show($("panel-push"));

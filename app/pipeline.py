@@ -210,3 +210,25 @@ def cleanup_upload(sess: Session) -> None:
             log.info("upload deleted: %s", sess.upload_path.name)
     except OSError as exc:
         log.warning("upload delete failed: %s", exc)
+
+
+def anonymized_text(sess: Session) -> str:
+    """Return the anonymized text from the session output, for on-screen copy/paste.
+
+    For text outputs (.txt / .csv / .html) we read the file directly. For
+    DOCX / XLSX / PDF / PPTX we re-run the extractor against the scrubbed
+    output so the user gets readable text without having to open the file
+    in another app. The file itself is still the authoritative deliverable
+    that downstream tools should consume.
+    """
+    if sess.output_path is None or not sess.output_path.exists():
+        raise RuntimeError("no output available yet")
+    if sess.verify_result is None or not sess.verify_result.get("passed"):
+        raise RuntimeError("verification has not passed - text view blocked")
+
+    suffix = sess.output_path.suffix.lower().lstrip(".")
+    if suffix in ("txt", "csv", "html", "htm", "rtf"):
+        return sess.output_path.read_text(encoding="utf-8", errors="replace")
+    # Binary formats - re-extract.
+    from .extractors import extract  # local import to avoid bootstrap cycles
+    return extract(sess.output_path).text

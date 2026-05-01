@@ -314,6 +314,28 @@ def create_app() -> Flask:
         pipeline.cleanup_upload(sess)
         return send_file(sess.output_path, as_attachment=True)
 
+    @app.get("/api/anonymize/<sid>/text")
+    def anon_text(sid: str):
+        """Return the scrubbed text for on-screen copy/paste.
+
+        Verification gate applies here too - text is not released until
+        the post-scrub verification pass succeeds (PRD 5.10).
+        """
+        sess = pipeline.get_session(sid)
+        if not sess or not sess.output_path or not sess.output_path.exists():
+            abort(404)
+        if not sess.verify_result or not sess.verify_result.get("passed"):
+            abort(403)
+        try:
+            text = pipeline.anonymized_text(sess)
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+        return jsonify({
+            "text": text,
+            "char_count": len(text),
+            "filename": sess.output_path.name,
+        })
+
     @app.get("/api/anonymize/<sid>/download/key")
     def anon_dl_key(sid: str):
         sess = pipeline.get_session(sid)

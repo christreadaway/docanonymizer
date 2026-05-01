@@ -157,7 +157,23 @@
       <div class="actions">
         <button type="button" class="btn" id="btn-dl-file" disabled>[ DOWNLOAD FILE ]</button>
         <button type="button" class="btn" id="btn-dl-key" disabled>[ DOWNLOAD KEY ]</button>
+        <button type="button" class="btn secondary" id="btn-view-text" disabled>[ VIEW ON SCREEN ]</button>
         <button type="button" class="btn secondary" id="btn-push-github" disabled>[ PUSH TO GITHUB ]</button>
+      </div>
+
+      <!-- Anonymized text panel (opens on VIEW ON SCREEN) -->
+      <div class="hidden" id="block-screen-text">
+        <div class="section-label" style="margin-top: 22px;">ANONYMIZED TEXT</div>
+        <div class="preview-summary">
+          <span class="muted">Read-only. Re-extracted from the verified output. Safe to copy / paste anywhere - all PII has been replaced.</span>
+        </div>
+        <textarea id="screen-text" class="screen-text" readonly aria-label="anonymized text"></textarea>
+        <div class="preview-actions">
+          <button type="button" class="btn sm" id="btn-copy-text">[ COPY ALL ]</button>
+          <button type="button" class="btn secondary sm" id="btn-hide-text">[ HIDE ]</button>
+          <span class="grow"></span>
+          <span class="preview-hint" id="screen-text-meta"></span>
+        </div>
       </div>
     </div>
 

@@ -218,6 +218,120 @@ def test_github_redacts_token():
         assert c_rec.get("token") in (None, "***")
 
 
+def test_anonymize_view_text_returns_scrubbed_content():
+    """End-to-end: text content endpoint returns the anonymized text after a verified run."""
+    import time
+    from app import detector
+
+    fake = json.dumps([{"text": "Jane Smith", "type": "PERSON", "linked_to": None}])
+    c = _client()
+    with patch.object(detector.llm, "llm_call", return_value=fake):
+        r = c.post("/api/anonymize/upload", data={
+            "file": (io.BytesIO(b"Hello Jane Smith - have a good day"), "memo.txt"),
+            "tags": "ALL",
+        }, content_type="multipart/form-data")
+        sid = r.get_json()["session_id"]
+        for _ in range(60):
+            s = c.get(f"/api/anonymize/{sid}/status").get_json()
+            if s.get("detection_complete"):
+                break
+            time.sleep(0.05)
+        c.post(f"/api/anonymize/{sid}/confirm", json={"deselected": []})
+        for _ in range(60):
+            res = c.get(f"/api/anonymize/{sid}/results").get_json()
+            if res.get("verify_result"):
+                break
+            time.sleep(0.05)
+
+    r = c.get(f"/api/anonymize/{sid}/text")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "Jane Smith" not in body["text"]
+    assert "[PERSON_" in body["text"]
+    assert body["char_count"] > 0
+    assert body["filename"].endswith(".txt")
+
+
+def test_anonymize_view_text_blocked_until_verified():
+    """The text endpoint enforces the same verification gate as downloads."""
+    import time
+    from app import detector, verifier
+    from unittest.mock import patch as _patch
+
+    fake = json.dumps([{"text": "Jane Smith", "type": "PERSON", "linked_to": None}])
+    c = _client()
+    fail = verifier.VerifyResult(passed=False, total_matches=1, regex_match_types=["EMAIL"])
+    with _patch.object(detector.llm, "llm_call", return_value=fake), \
+         _patch("app.pipeline.verify_output", return_value=fail):
+        r = c.post("/api/anonymize/upload", data={
+            "file": (io.BytesIO(b"Hello Jane Smith"), "memo.txt"),
+            "tags": "ALL",
+        }, content_type="multipart/form-data")
+        sid = r.get_json()["session_id"]
+        for _ in range(60):
+            s = c.get(f"/api/anonymize/{sid}/status").get_json()
+            if s.get("detection_complete"):
+                break
+            time.sleep(0.05)
+        c.post(f"/api/anonymize/{sid}/confirm", json={"deselected": []})
+        for _ in range(60):
+            res = c.get(f"/api/anonymize/{sid}/results").get_json()
+            if res.get("verify_result"):
+                break
+            time.sleep(0.05)
+
+    r = c.get(f"/api/anonymize/{sid}/text")
+    assert r.status_code == 403
+
+
+def test_anonymize_view_text_xlsx_reextracts_cells():
+    """XLSX output is binary - the endpoint should re-extract the text cells."""
+    import time
+    from app import detector
+
+    # Build an xlsx upload in memory.
+    import openpyxl
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["name", "email"])
+    ws.append(["Jane Smith", "jane@x.org"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    fake = json.dumps([
+        {"text": "Jane Smith", "type": "PERSON", "linked_to": None},
+        {"text": "jane@x.org", "type": "EMAIL", "linked_to": "Jane Smith"},
+    ])
+    c = _client()
+    with patch.object(detector.llm, "llm_call", return_value=fake):
+        r = c.post("/api/anonymize/upload", data={
+            "file": (buf, "donors.xlsx"),
+            "tags": "ALL",
+        }, content_type="multipart/form-data")
+        sid = r.get_json()["session_id"]
+        for _ in range(60):
+            s = c.get(f"/api/anonymize/{sid}/status").get_json()
+            if s.get("detection_complete"):
+                break
+            time.sleep(0.05)
+        c.post(f"/api/anonymize/{sid}/confirm", json={"deselected": []})
+        for _ in range(60):
+            res = c.get(f"/api/anonymize/{sid}/results").get_json()
+            if res.get("verify_result"):
+                break
+            time.sleep(0.05)
+
+    r = c.get(f"/api/anonymize/{sid}/text")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "Jane Smith" not in body["text"]
+    assert "jane@x.org" not in body["text"]
+    assert "[PERSON_" in body["text"]
+    assert "[EMAIL_" in body["text"]
+
+
 def test_anonymize_download_blocked_until_verified():
     """Force a verify failure and confirm the download endpoint refuses."""
     import time
