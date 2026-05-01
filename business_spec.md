@@ -1,7 +1,7 @@
 # Business Spec: Doc Anonymizer
 
 **Last updated:** 2026-05-01  
-**Status:** In development
+**Status:** v1 implementation complete - awaiting operator validation
 
 ---
 
@@ -64,3 +64,21 @@ This is a document preparation tool, not an analysis tool. It anonymizes. It doe
 v1 ships with text-preserving output for PDF and PPTX (formatting not rebuilt). Full format-preserving output for XLSX, DOCX, and CSV. All other major formats extracted to text.
 
 v2 targets PDF rebuild with formatting preserved, and in-place PPTX scrubbing.
+
+---
+
+## Operational Decisions (resolved during implementation)
+
+The PRD listed six open questions. Three are resolved as built; three are deferred to v2.
+
+**Resolved:**
+
+1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after each session ends (success, failure, or cancel). `/output/` and `/keys/` are kept for the operator to manage manually - they are work product, not transient.
+2. **XLSX formulas containing PII.** Flag and warn, do not silently rewrite. The scrubber reports `formula_warnings` to the UI so the operator can decide whether to revise the formula by hand before sharing.
+3. **LLM timeout mid-chunk.** Log the failed chunk and continue. The post-scrub verifier is the safety net - any PII the LLM missed in a failed chunk will surface there, blocking download.
+
+**Deferred to v2:**
+
+4. Optional AES-encrypted key files at rest.
+5. Whitelist UI for false-positive regex matches in verification (currently any regex hit fails the run; the operator must abort or retry).
+6. Manual highlight-and-tag UI in the preview panel for operator-added PII spans the LLM missed.

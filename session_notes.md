@@ -147,3 +147,93 @@ Comprehensive headless test pass with Playwright revealed six bugs across the im
 - Operator review of `screens.html` to confirm the screen flow and visual direction before any backend work begins.
 - Once approved, scaffold the Flask skeleton from PRD 11 and wire the screens into Jinja templates (or keep them as a static reference and rebuild equivalent markup behind the Flask routes).
 - Decide the `[ DARK ]` toggle placement and reconcile the prototype/PRD divergence.
+
+---
+
+## Session 003 - 2026-05-01 (Claude Code, branch `claude/implement-screens-design-Wvu9O`)
+
+**Type:** Implementation - full v1.3 build per PRD.
+
+### What Was Built
+
+Complete Flask app with vanilla-JS frontend implementing the entire PRD. 12 Python modules under `app/`, single-page UI under `templates/` and `static/`, runtime data dirs `uploads/`, `output/`, `keys/`. Top-level entrypoint `run.py`.
+
+**Python modules (`app/`):**
+
+| Module | Responsibility |
+|---|---|
+| `config.py`              | env-driven config; `DOCANON_ROOT` override for tests; runtime data paths separated from source-tree paths so Flask can always find templates/static |
+| `logging_setup.py`       | structured ISO-Z / level / module logger writing to `anonymizer.log` and stdout |
+| `endpoints.py`           | LLM endpoint manager: persisted to `endpoints.json`, RFC1918/loopback validation guard, parallel health checks |
+| `llm.py`                 | adapter contract `llm_call(prompt, endpoint=...)` for `ollama` and `openai` API styles |
+| `extractors.py`          | per-format text extraction (PDF, DOCX, XLSX, CSV, PPTX, ODT/ODS/ODP via LibreOffice, TXT/RTF/HTML); returns format-aware `ExtractResult` |
+| `chunker.py`             | tiktoken-aware chunking with 200-token overlap; chars-fallback when tiktoken is missing |
+| `mapper.py`              | `EntityRegistry`: 4-char hex IDs, entity-linking via `linked_to`, longest-first replacement map for collision-free substitution |
+| `detector.py`            | LLM detection orchestrator; tolerant JSON-array parser handles fences and prose; per-chunk error recovery |
+| `scrubber.py`            | surface-replace per format + ZIP-level deep scrub: tracked changes (`<w:ins>`/`<w:del>`) stripped, `word/comments.xml` cleared, `xl/comments*.xml` dropped, `dc:creator` / `cp:lastModifiedBy` zeroed, alt-text descr stripped, raw-XML map substitution across every part |
+| `verifier.py`            | post-scrub re-extraction + map-reverse + regex net (EMAIL/PHONE/SSN/IP/CREDIT_CARD); strips placeholders before regex to avoid false positives |
+| `key_files.py`           | `*.key.json` save/load per PRD 5.7 schema |
+| `unanonymize.py`         | reverses the replacement map (longest-first) and routes through the same writers |
+| `github_mgr.py`          | connection storage in `github.json` (PAT redacted in API), `repos/{owner}/{name}` test, `PUT contents` push with auto-fetched SHA |
+| `pipeline.py`            | session orchestrator: extract -> detect -> preview -> confirm -> scrub -> verify; runs detection / scrub on background threads so HTTP returns immediately |
+| `server.py`              | Flask routes per the API plan in the file's docstring |
+
+**Frontend:**
+
+- `templates/index.html` - single page, no CDN, no framework. Sections: header, status bar, endpoint manager panel, GitHub manager panel, mode tabs, file drop zone, PII grid, detect button, detection progress, preview, scrub progress, results, GitHub push panel, log panel.
+- `static/styles.css` - dark + light tokens via `prefers-color-scheme` plus a manual `[data-theme]` override that persists to `localStorage`.
+- `static/app.js` - vanilla JS: state object, fetch wrapper, theme toggle, endpoint CRUD + health, GitHub CRUD + test, drop-zone + change handler, PII grid renderer, detection polling, preview placeholder rendering with click-to-deselect, scrub polling, results table, GitHub push panel, log tail.
+
+### Decisions and Assumptions
+
+- **Per-process in-memory sessions.** Single-user local tool; no need for Redis or DB. `pipeline._SESSIONS` is a dict guarded by a lock. Sessions disappear on restart. Outputs stay in `output/`; key files in `keys/`.
+- **Background threads for long ops.** Upload, detection, and scrub are launched on `threading.Thread` so the HTTP request returns instantly. The frontend polls `/status` and `/results` until done. This avoids long-held connections for 30s+ LLM calls.
+- **Open Question 1 (auto-cleanup of `/uploads` and `/output`).** Decided: `/uploads/` is purged immediately after the session completes (or is cancelled). `/output/` is kept for the user to manage manually - it's their anonymized work product.
+- **Open Question 2 (XLSX formulas containing PII).** Decided: flag and warn, do not silently rewrite. The scrubber surfaces `formula_warnings` to the UI so the operator can review.
+- **Open Question 4 (LLM timeout mid-chunk).** Decided: log and skip the failed chunk, continue with the rest. The verifier catches anything missed. A more aggressive resume policy can come in v2.
+- **Deep scrub ordering.** The deep-scrub ZIP walk now applies the raw map substitution **before** the targeted handlers (metadata-zero, comments-clear). This is defense-in-depth: even if a placeholder lands in `<dc:creator>` via the raw pass, the explicit handler still empties it.
+- **Per-row `white-space: pre` for results.** Same lesson as the screens.html session: scoped to row divs to keep template-literal whitespace from rendering as blank lines.
+- **Theme toggle.** Honors `prefers-color-scheme` until the user explicitly clicks `[ DARK ]` / `[ LIGHT ]`, at which point `data-theme` on `<html>` wins and persists to `localStorage`.
+- **Module names.** `app.server` (not `app.app`) for the Flask app so the entrypoint reads `python run.py` cleanly without shadowing the package name.
+
+### Bugs Found and Fixed (this session)
+
+Discovered via the test suite + headless UI rendering:
+
+1. **High - XLSX deep-scrub broke OOXML namespace.** The `<dc:creator>` zeroing handler self-closed the tag, dropping its `xmlns:dc` attribute, which made openpyxl reject the file on reload. Fix: keep the original opening tag (with all attributes) and empty only the inner text via a backref-replace.
+2. **High - test isolation broke template loading.** `DOCANON_ROOT` was overriding `TEMPLATES_DIR`, so under tests Flask couldn't find `templates/index.html`. Fix: split `SOURCE_ROOT` (always anchored to `app/__init__.py`'s parent) from runtime `ROOT`. Templates and static now use `SOURCE_ROOT`.
+3. **Medium - drop zone collapsed to inline width.** `<label>` is inline by default. Added `display: block` to `.dropzone`.
+4. **Medium - DETECT button lost the file reference after innerHTML rewrite.** Captured the chosen file in `state.anonFile` so the button click path reads from state, not the (now destroyed) DOM input. Same pattern for unanon zones via `state.unanon`.
+5. **Low - PII grid rendered alphabetically.** Server was passing `sorted(VALID_TAGS)`. Added `mapper.TAG_ORDER` (the spec's order) and routed the index template + detector prompt through it.
+6. **Low - metadata-zero handler ran before raw substitution.** That left "Jane Smith" in `<dc:creator>` because the regex didn't tolerate `xmlns:dc`. Reordered: raw substitution first, then targeted handlers (defense in depth) - and the regex was made permissive.
+
+### Tests Run
+
+`pytest tests/` - **58/58 passing** in ~2 seconds. Suite mocks the LLM (no network, no local Ollama required) and isolates each test against a fresh `DOCANON_ROOT` temp directory.
+
+Coverage areas:
+
+- `test_mapper.py` (10) - hex uniqueness, entity linking by hex / by text, longest-first sort, drop, invalid tag rejection, merge_chunks input sanitization, 500-entity stress.
+- `test_endpoints.py` (8) - default state, CRUD, validation, RFC1918 / loopback / link-local detection, atomic write semantics, unreachable-endpoint health check.
+- `test_extractors.py` (7) - txt, csv, html (script + style + tags stripped), xlsx, docx (header/footer/tables walked), pptx (speaker notes captured), unsupported-suffix rejection.
+- `test_scrubber_verifier.py` (10) - text / csv / xlsx / docx surface replace, deep-scrub raw-XML pass, metadata zeroing, tracked-changes (`<w:ins>`/`<w:del>`) stripping with manual XML injection, formula warnings, verifier pass / map-residue fail / regex-residue fail / placeholder-immunity.
+- `test_unanonymize.py` (3) - text + xlsx round-trip; longest-first reversal collision test.
+- `test_detector.py` (6) - JSON extraction (direct / fenced / prose / empty), full detection with mocked llm_call, error-recovery on failing chunk.
+- `test_server.py` (12) - health, endpoint CRUD via API, invalid-payload rejection, local-URL check, index page render, unsupported-upload rejection, full upload -> detect -> confirm -> verify -> download flow with mocked LLM, unanonymize via API, GitHub PAT redaction, **download blocked when verification fails**.
+- `test_privacy.py` (2) - **end-to-end pipeline run + log scan: zero PII values appear anywhere in `anonymizer.log`**; mapper logger-level scan.
+
+Plus a Playwright headless run against the live Flask server: status bar populated, 17 PII rows in spec order, 6 sensitive flags, SANITIZE-ALL toggle locks/unlocks individual checkboxes, theme toggle round-trips, manage panels open/close, tabs switch, file upload enables DETECT button, endpoint add round-trips through the API. **Zero console errors.**
+
+### Open Issues / Known Limitations
+
+- The detector's prompt is well-instructed but model quality varies. Real-world testing against Llama 3.2, Mistral 7B, and Phi-3 should follow before the operator runs production data through it. Consider a small built-in prompt-tuning panel in v2.
+- PDF and PPTX output are text-only in v1 (per PRD 8). DOCX / XLSX preserve formatting fully.
+- Open Questions 3, 5, 6 from PRD remain open - key file encryption, regex-whitelist after a verify miss, and manual span tagging in the preview. None are blockers for v1.
+- The frontend log panel polls only on user action (refresh / after each pipeline transition). A streaming server-sent events upgrade would be nicer in v2.
+- Status bar still wraps to two rows under 760px. Same call as Session 002: acceptable for now, revisit when the visual design lands.
+
+### Next Steps
+
+- Operator runs the app against a real local LLM (Ollama/Llama 3.2) on a sample donor list and validates the detection quality.
+- Add a small fixture corpus to `tests/` (sanitized DOCX with tracked changes, sample XLSX with formulas, PDF with text) so the test suite exercises real document shapes, not only synthesized ones.
+- Wire up the `[ HOOKS ]` for resolving Open Questions 3 / 5 / 6 if the operator wants them in v2.
