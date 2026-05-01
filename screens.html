@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>DocAnon - Screens</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ---------- Canvas (design board) tokens ---------- */
+  :root {
+    --canvas-bg: #f0eee9;
+    --canvas-grid: rgba(0, 0, 0, 0.06);
+    --canvas-label: rgba(60, 50, 40, 0.7);
+    --canvas-title: rgba(40, 30, 20, 0.85);
+    --canvas-subtitle: rgba(60, 50, 40, 0.6);
+    --canvas-font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+    /* ---------- Browser chrome ---------- */
+    --chrome-bar-bg: #202124;
+    --chrome-tab-bg: #35363a;
+    --chrome-text: #e8eaed;
+    --chrome-dim: #9aa0a6;
+    --chrome-url-bg: #282a2d;
+
+    /* ---------- DocAnon dark tokens (PRD 12.2) ---------- */
+    --bg-primary: #0a0a0a;
+    --bg-surface: #141414;
+    --bg-inset: #1e1e1e;
+    --border: #2e2e2e;
+    --border-focus: #ffffff;
+    --text-primary: #f0f0f0;
+    --text-secondary: #888888;
+    --text-dim: #444444;
+    --accent: #ffffff;
+    --accent-bg: #ffffff;
+    --accent-fg: #000000;
+    --danger: #ff4444;
+    --success: #00cc66;
+    --warning: #ffaa00;
+    --tag-bg: #1e1e1e;
+    --tag-border: #444444;
+    --tag-text: #cccccc;
+
+    --mono: ui-monospace, "Cascadia Code", "Menlo", "Consolas", monospace;
+  }
+
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--canvas-bg);
+    background-image:
+      url("data:image/svg+xml,%3Csvg width='120' height='120' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M120 0H0v120' fill='none' stroke='rgba(0,0,0,0.06)' stroke-width='1'/%3E%3C/svg%3E");
+    background-size: 120px 120px;
+    font-family: var(--canvas-font);
+    min-height: 100vh;
+  }
+
+  /* ---------- Section header ---------- */
+  .dc-section { padding: 60px 60px 80px; }
+  .dc-section-title {
+    font-size: 28px; font-weight: 600;
+    color: var(--canvas-title);
+    letter-spacing: -0.4px; margin: 0 0 6px;
+  }
+  .dc-section-subtitle {
+    font-size: 16px; color: var(--canvas-subtitle); margin: 0 0 56px;
+  }
+
+  /* ---------- Artboard row ---------- */
+  .dc-row {
+    display: flex; gap: 48px; align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: 60px;
+  }
+  .dc-slot { position: relative; flex-shrink: 0; }
+  .dc-label {
+    position: absolute; bottom: 100%; left: 0; margin-bottom: 8px;
+    color: var(--canvas-label);
+    font-size: 15px; font-weight: 500; line-height: 1;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .dc-grip {
+    display: flex; align-items: center; padding: 5px 4px;
+    border-radius: 4px; color: var(--canvas-label); opacity: 0.5;
+  }
+  .dc-card {
+    border-radius: 2px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    width: 1100px; height: 780px;
+    background: #fff;
+  }
+
+  /* ---------- Browser chrome ---------- */
+  .chrome { display: flex; flex-direction: column; height: 100%;
+    background: var(--chrome-tab-bg);
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.1);
+  }
+  .chrome-tabbar {
+    display: flex; align-items: center; height: 44px;
+    background: var(--chrome-bar-bg); padding-right: 8px;
+  }
+  .chrome-traffic { display: flex; gap: 8px; padding: 0 14px; }
+  .chrome-traffic > div { width: 12px; height: 12px; border-radius: 50%; }
+  .chrome-traffic > div:nth-child(1) { background: #ff5f57; }
+  .chrome-traffic > div:nth-child(2) { background: #febc2e; }
+  .chrome-traffic > div:nth-child(3) { background: #28c840; }
+  .chrome-tabs { display: flex; align-items: flex-end; height: 100%; padding-left: 4px; flex: 1; }
+  .chrome-tab {
+    position: relative; height: 34px; align-self: flex-end;
+    padding: 0 12px;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--chrome-tab-bg);
+    border-radius: 8px 8px 0 0;
+    min-width: 120px; max-width: 220px;
+    font-family: system-ui, sans-serif; font-size: 12px;
+    color: var(--chrome-text);
+  }
+  .chrome-tab .favicon {
+    width: 14px; height: 14px; border-radius: 50%; background: #5f6368; flex-shrink: 0;
+  }
+  .chrome-tab .title {
+    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chrome-tab svg.curve-l { position: absolute; bottom: 0; left: -8px; }
+  .chrome-tab svg.curve-r { position: absolute; bottom: 0; right: -8px; transform: scaleX(-1); }
+
+  .chrome-toolbar {
+    height: 40px; background: var(--chrome-tab-bg);
+    display: flex; align-items: center; gap: 4px; padding: 0 8px;
+  }
+  .chrome-icon {
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .chrome-icon > div {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--chrome-dim); opacity: 0.4;
+  }
+  .chrome-urlbar {
+    flex: 1; height: 30px; border-radius: 15px; background: var(--chrome-url-bg);
+    display: flex; align-items: center; gap: 8px; padding: 0 14px;
+    margin: 0 6px;
+  }
+  .chrome-urlbar > .lock {
+    width: 12px; height: 12px; border-radius: 50%; background: var(--chrome-dim); opacity: 0.4;
+  }
+  .chrome-urlbar > .url {
+    flex: 1; color: var(--chrome-text); font-size: 13px;
+    font-family: system-ui, sans-serif;
+  }
+  .chrome-body { flex: 1; background: #fff; overflow: hidden; }
+
+  /* ---------- DocAnon app body ---------- */
+  .da-app {
+    background: var(--bg-primary); color: var(--text-primary);
+    height: 100%; min-height: 100%;
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+  .da-inner { max-width: 760px; margin: 0 auto; padding: 24px 24px 32px; }
+
+  .da-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding-bottom: 14px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .da-header .name {
+    font-family: var(--mono); font-weight: 700; font-size: 18px;
+    letter-spacing: 0.06em;
+  }
+  .da-header .ver {
+    color: var(--text-secondary); font-family: var(--mono); font-size: 12px;
+  }
+
+  /* ---------- Status bar ---------- */
+  .da-status {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-surface); border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 13px;
+  }
+  .da-status .lbl { color: var(--text-secondary); }
+  .da-status .name { color: var(--text-primary); }
+  .da-status .model { color: var(--text-secondary); }
+  .da-status .grow { flex: 1; }
+  .da-status select {
+    background: var(--bg-inset); color: var(--text-primary);
+    border: 1px solid var(--border);
+    height: 28px; padding: 0 10px;
+    font-family: var(--mono); font-size: 12px;
+    appearance: none; -webkit-appearance: none; border-radius: 0;
+    background-image: none;
+  }
+  .da-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .da-dot.ok { background: var(--success); }
+  .da-dot.err { background: var(--danger); }
+
+  /* ---------- Buttons ---------- */
+  .da-btn {
+    font-family: var(--mono); font-size: 14px; line-height: 1;
+    height: 40px; padding: 0 20px;
+    border: none; border-radius: 0;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    letter-spacing: 0.02em;
+    background: var(--accent-bg); color: var(--accent-fg);
+    white-space: nowrap;
+  }
+  .da-btn.sm { height: 32px; padding: 0 14px; font-size: 13px; }
+  .da-btn.block { width: 100%; }
+  .da-btn.secondary {
+    background: transparent; color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+  .da-btn.danger {
+    background: transparent; color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+  .da-btn[disabled] {
+    background: var(--bg-inset); color: var(--text-dim);
+    border: 1px solid var(--border); cursor: not-allowed;
+  }
+
+  /* ---------- Tabs ---------- */
+  .da-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .da-tab {
+    height: 40px; padding: 0 24px;
+    display: inline-flex; align-items: center;
+    background: transparent; color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 14px; letter-spacing: 0.02em;
+    margin-bottom: -1px;
+  }
+  .da-tab.active {
+    background: var(--accent-bg); color: var(--accent-fg);
+    border-bottom-color: var(--accent-bg);
+  }
+
+  /* ---------- Section label ---------- */
+  .da-section-label {
+    color: var(--text-secondary); font-size: 11px; font-family: var(--mono);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .gap-12 { height: 12px; }
+  .gap-18 { height: 18px; }
+  .gap-22 { height: 22px; }
+
+  /* ---------- Drop zone ---------- */
+  .da-drop {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: var(--mono); font-size: 14px;
+  }
+  .da-drop.empty {
+    border: 1px dashed var(--border);
+    padding: 32px; text-align: center;
+  }
+  .da-drop.empty .sub { color: var(--text-secondary); margin-top: 4px; }
+  .da-drop.loaded {
+    border: 1px solid var(--border);
+    padding: 18px;
+  }
+  .da-drop.loaded .meta {
+    color: var(--text-secondary); font-size: 12px; margin-top: 4px;
+  }
+
+  /* ---------- PII grid ---------- */
+  .da-pii {
+    display: grid; grid-template-columns: 1fr 1fr;
+    column-gap: 24px; row-gap: 0;
+    border: 1px solid var(--border); padding: 12px;
+    background: var(--bg-surface);
+  }
+  .da-pii .row {
+    display: grid; grid-template-columns: 90px 1fr auto;
+    column-gap: 10px; align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    opacity: 0.85;
+  }
+  .da-pii .tag {
+    color: var(--text-primary); font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+  .da-pii .label {
+    font-size: 12px; font-family: var(--mono); color: var(--text-primary);
+  }
+  .da-pii .label .ex { color: var(--text-secondary); margin-left: 6px; }
+  .da-pii .sens-flag {
+    color: var(--warning); font-size: 10px; font-family: var(--mono);
+    letter-spacing: 0.06em;
+  }
+  .da-pii .check {
+    color: var(--text-secondary); font-size: 10px; font-family: var(--mono);
+  }
+  .da-pii .check-box {
+    display: inline-block; width: 12px; height: 12px;
+    border: 1px dashed var(--border); background: var(--bg-inset);
+    position: relative; vertical-align: middle;
+  }
+  .da-pii .check-box::after {
+    content: ''; position: absolute; inset: 2px; background: var(--text-primary);
+  }
+
+  /* ---------- Progress steps ---------- */
+  .da-progress {
+    background: var(--bg-inset); border: 1px solid var(--border); padding: 14px;
+  }
+  .da-step {
+    display: flex; gap: 10px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.7;
+  }
+  .da-step .glyph { width: 3ch; flex-shrink: 0; }
+  .da-step.pending .glyph { color: var(--text-secondary); }
+  .da-step.pending .text { color: var(--text-dim); }
+  .da-step.active .glyph,
+  .da-step.active .text { color: var(--text-primary); }
+  .da-step.done .glyph { color: var(--success); }
+  .da-step.done .text { color: var(--text-primary); }
+  .da-step.err .glyph,
+  .da-step.err .text { color: var(--danger); }
+
+  .da-blink {
+    display: inline-block; width: 0.6ch; height: 1em;
+    vertical-align: -0.15em; background: currentColor; margin-left: 2px;
+    animation: da-blink 1s steps(2, start) infinite;
+  }
+  @keyframes da-blink { to { visibility: hidden; } }
+
+  /* ---------- Log panel ---------- */
+  .da-log {
+    background: var(--bg-inset); border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; color: var(--text-primary);
+  }
+  .da-log .head {
+    display: flex; align-items: center; padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .da-log .head .title { color: var(--text-primary); }
+  .da-log .head .grow { flex: 1; }
+  .da-log .head .da-btn { height: 24px; padding: 0 8px; font-size: 11px; }
+  .da-log .body {
+    padding: 10px; line-height: 1.55;
+    height: 130px; overflow: hidden;
+    white-space: pre; font-family: var(--mono);
+  }
+  .da-log .ts { color: var(--text-secondary); }
+  .da-log .lvl-INFO { color: var(--success); }
+  .da-log .lvl-WARN { color: var(--warning); }
+  .da-log .lvl-ERR { color: var(--danger); }
+  .da-log .mod { color: var(--text-secondary); }
+
+  /* ---------- Preview text ---------- */
+  .da-preview-summary {
+    display: flex; gap: 24px; color: var(--text-secondary);
+    font-family: var(--mono); font-size: 12px; margin-bottom: 8px;
+  }
+  .da-preview-summary b { color: var(--text-primary); font-weight: 700; }
+  .da-preview-body {
+    background: var(--bg-inset); border: 1px solid var(--border);
+    padding: 14px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    color: var(--text-primary);
+    height: 270px; overflow: hidden;
+    white-space: pre-wrap;
+  }
+  .da-placeholder {
+    display: inline-block;
+    color: var(--warning); font-family: var(--mono);
+    border-bottom: 1px dashed var(--warning);
+    padding: 0 2px; cursor: help;
+  }
+  .da-preview-actions {
+    display: flex; gap: 12px; align-items: center;
+  }
+  .da-preview-actions .grow { flex: 1; }
+  .da-preview-hint {
+    color: var(--text-secondary); font-family: var(--mono); font-size: 12px;
+  }
+
+  /* ---------- Results ---------- */
+  .da-results {
+    background: var(--bg-inset); border: 1px solid var(--border);
+    padding: 14px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.7;
+    white-space: pre; color: var(--text-primary);
+  }
+  .da-results .rule { color: var(--text-dim); }
+  .da-results .verified { color: var(--success); }
+  .da-results .failed { color: var(--danger); }
+
+  .da-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div class="dc-section">
+  <h1 class="dc-section-title">Anonymize - Happy Path</h1>
+  <p class="dc-section-subtitle">Empty &rarr; file loaded &rarr; detecting &rarr; preview &rarr; scrubbing &rarr; results</p>
+
+  <div class="dc-row" id="row"></div>
+</div>
+
+<!-- ============================================================
+     Re-usable HTML templates rendered via vanilla JS below.
+     ============================================================ -->
+<script>
+  /* ---------- Browser chrome ---------- */
+  function chrome(innerHtml, tabTitle, url) {
+    return `
+      <div class="chrome">
+        <div class="chrome-tabbar">
+          <div class="chrome-traffic"><div></div><div></div><div></div></div>
+          <div class="chrome-tabs">
+            <div class="chrome-tab">
+              <svg class="curve-l" width="8" height="10" viewBox="0 0 8 10"><path d="M0 10C2 9 6 8 8 0V10H0Z" fill="#35363a"/></svg>
+              <svg class="curve-r" width="8" height="10" viewBox="0 0 8 10"><path d="M0 10C2 9 6 8 8 0V10H0Z" fill="#35363a"/></svg>
+              <span class="favicon"></span>
+              <span class="title">${tabTitle}</span>
+            </div>
+          </div>
+        </div>
+        <div class="chrome-toolbar">
+          <div class="chrome-icon"><div></div></div>
+          <div class="chrome-urlbar">
+            <div class="lock"></div>
+            <span class="url">${url}</span>
+          </div>
+          <div class="chrome-icon"><div></div></div>
+        </div>
+        <div class="chrome-body">${innerHtml}</div>
+      </div>
+    `;
+  }
+
+  /* ---------- DocAnon header + status bar + tabs ---------- */
+  function header() {
+    return `
+      <div class="da-header">
+        <span class="name">DOC-ANON</span>
+        <span class="ver">v1.3</span>
+      </div>
+    `;
+  }
+
+  function statusBar() {
+    return `
+      <div class="da-status">
+        <span class="lbl">&gt;&nbsp;ENDPOINT:</span>
+        <span class="name">Ollama (local)</span>
+        <span class="model">[llama3.2]</span>
+        <span class="da-dot ok"></span>
+        <span class="grow"></span>
+        <select><option>Ollama (local)</option></select>
+        <button class="da-btn secondary sm">[ MANAGE ENDPOINTS ]</button>
+        <button class="da-btn secondary sm">[ MANAGE GITHUB ]</button>
+        <button class="da-btn secondary sm">[ DARK ]</button>
+      </div>
+    `;
+  }
+
+  function tabs(active) {
+    active = active || 'ANONYMIZE';
+    return `
+      <div class="da-tabs">
+        <div class="da-tab${active === 'ANONYMIZE' ? ' active' : ''}">[ ANONYMIZE ]</div>
+        <div class="da-tab${active === 'UNANONYMIZE' ? ' active' : ''}">[ UNANONYMIZE ]</div>
+      </div>
+    `;
+  }
+
+  /* ---------- Drop zone ---------- */
+  function dropZoneEmpty() {
+    return `
+      <div class="da-drop empty">
+        <div>&gt; DROP FILE HERE</div>
+        <div class="sub">&nbsp;&nbsp;or [ BROWSE ]</div>
+      </div>
+    `;
+  }
+  function dropZoneLoaded(filename, meta) {
+    return `
+      <div class="da-drop loaded">
+        <div>${filename}</div>
+        <div class="meta">${meta}</div>
+      </div>
+    `;
+  }
+
+  /* ---------- PII grid ---------- */
+  const PII_LIST = [
+    ['PERSON',     'Full Names',         'Jane Smith',                 false],
+    ['EMAIL',      'Email Addresses',    'jane@school.org',            false],
+    ['PHONE',      'Phone Numbers',      '(512) 555-0198',             false],
+    ['ADDRESS',    'Physical Addresses', '123 Main St, Austin TX',     false],
+    ['ID',         'SSN / Tax IDs',      '123-45-6789',                false],
+    ['ORG',        'Organizations',      'St. Theresa School',         false],
+    ['FINANCIAL',  'Financial Data',     'Acct #4482',                 false],
+    ['DOB',        'Dates of Birth',     '03/14/1992',                 false],
+    ['SID',        'Student / Emp ID',   'Student ID 40021',           false],
+    ['IP',         'IP Addresses',       '192.168.1.100',              false],
+    ['USERNAME',   'Usernames',          '@jsmith',                    false],
+    ['GRADE',      'Grades / GPA',       'GPA 3.87',                   true],
+    ['MEDICAL',    'Medical / Health',   'IEP, Type 1 diabetes',       true],
+    ['IMMIGRATION','Immigration',        'F-1 visa',                   true],
+    ['DEMO',       'Race / Ethnicity',   'Hispanic',                   true],
+    ['RELIGION',   'Religion',           'Catholic',                   true],
+    ['GENDER',     'Gender / Pronouns',  'she/her',                    true],
+  ];
+  function piiGrid() {
+    const rows = PII_LIST.map(([tag, label, ex, sens]) => `
+      <div class="row">
+        <span class="tag">${tag}</span>
+        <span class="label">${label}<span class="ex">&middot; ${ex}</span></span>
+        ${sens
+          ? `<span class="sens-flag">[SENS]</span>`
+          : `<span class="check"><span class="check-box"></span></span>`}
+      </div>
+    `).join('');
+    return `<div class="da-pii">${rows}</div>`;
+  }
+
+  /* ---------- Progress + log ---------- */
+  function progressSteps(steps) {
+    const items = steps.map(s => {
+      const cls = s.kind || 'pending';
+      const blink = s.blink ? '<span class="da-blink"></span>' : '';
+      return `<div class="da-step ${cls}"><span class="glyph">${s.glyph}</span><span class="text">${s.text}${blink}</span></div>`;
+    }).join('');
+    return `<div class="da-progress">${items}</div>`;
+  }
+
+  function logPanel(lines) {
+    const padEnd = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+    const body = lines.map(l => {
+      return `<div><span class="ts">${l.ts}</span> <span class="lvl-${l.level}">[${padEnd(l.level, 4)}]</span> <span class="mod">${padEnd(l.mod, 10)}</span><span>${l.msg}</span></div>`;
+    }).join('');
+    return `
+      <div class="da-log">
+        <div class="head">
+          <span class="title">[ LOG ]</span>
+          <span class="grow"></span>
+          <button class="da-btn secondary sm">[ COPY LOG ]</button>
+        </div>
+        <div class="body">${body}</div>
+      </div>
+    `;
+  }
+
+  /* ---------- Preview placeholder ---------- */
+  function ph(label, original) {
+    return `<span class="da-placeholder" title="Original: ${original}">[${label}]</span>`;
+  }
+
+  /* ---------- Results table ---------- */
+  function results(verified) {
+    const rule = '────────────────────────────────────────';
+    const padEnd = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+    const rows = [
+      ['PERSON',  '4 entities', '12 replacements'],
+      ['EMAIL',   '4 entities', ' 4 replacements'],
+      ['PHONE',   '3 entities', ' 6 replacements'],
+      ['ADDRESS', '1 entity',   ' 2 replacements'],
+    ];
+    const totalLine = ['TOTAL', '12 entities', '24 replacements'];
+    let inner = '';
+    if (verified) {
+      inner += rows.map(([a, b, c]) => `<div>${padEnd(a, 10)} ${padEnd(b, 12)} ${c}</div>`).join('');
+      inner += `<div class="rule">${rule}</div>`;
+      inner += `<div>${padEnd(totalLine[0], 10)} ${padEnd(totalLine[1], 12)} ${totalLine[2]}</div>`;
+      inner += `<div class="rule">${rule}</div>`;
+    } else {
+      inner += `<div>MATCH TYPES: EMAIL, PHONE</div>`;
+      inner += `<div>ACTION: retry scrub or abort</div>`;
+      inner += `<div class="rule">${rule}</div>`;
+    }
+    return `
+      <div class="da-results">
+        <div class="rule">${rule}</div>
+        <div>COMPLETE: donors_anon_a3f9c1b2.xlsx</div>
+        <div class="${verified ? 'verified' : 'failed'}">${verified ? 'VERIFIED: 0 RESIDUAL PII DETECTED' : '[!] VERIFICATION FAILED: 2 MATCHES'}</div>
+        <div class="rule">${rule}</div>
+        ${inner}
+      </div>
+    `;
+  }
+
+  /* ---------- Frame: app body inside browser chrome ---------- */
+  function frame(bodyHtml) {
+    const inner = `
+      <div class="da-app">
+        <div class="da-inner">
+          ${header()}
+          ${bodyHtml}
+        </div>
+      </div>
+    `;
+    return chrome(inner, 'DOC-ANON · localhost:5000', 'http://localhost:5000');
+  }
+
+  /* ---------- Shared base log ---------- */
+  const baseLog = [
+    { ts: '2026-05-01T14:32:00Z', level: 'INFO', mod: '[app]',     msg: 'startup: port=5000 endpoints=2 active=ollama-local' },
+    { ts: '2026-05-01T14:32:01Z', level: 'INFO', mod: '[upload]',  msg: 'received: donor_list.xlsx 312.4 KB type=xlsx' },
+    { ts: '2026-05-01T14:32:01Z', level: 'INFO', mod: '[extract]', msg: 'xlsx extracted: 4218 chars across 3 sheets' },
+    { ts: '2026-05-01T14:32:03Z', level: 'INFO', mod: '[llm]',     msg: 'endpoint=ollama-local chunk=1/3 tokens=312 pii=8 t=2.1s' },
+    { ts: '2026-05-01T14:32:05Z', level: 'INFO', mod: '[mapper]',  msg: 'map: 3 PERSON, 3 EMAIL, 2 PHONE, 1 ADDRESS' },
+  ];
+
+  /* ============================================================
+     Screen 1 - Empty / first load
+     ============================================================ */
+  function screen1() {
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">FILE</div>
+      ${dropZoneEmpty()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">PII TYPES</div>
+      <button class="da-btn block">[ SANITIZE ALL ]</button>
+      <div class="gap-12"></div>
+      ${piiGrid()}
+      <div class="gap-22"></div>
+      <button class="da-btn block" disabled>[ DETECT PII ]</button>
+    `);
+  }
+
+  /* ============================================================
+     Screen 2 - File loaded, ready to detect
+     ============================================================ */
+  function screen2() {
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">FILE</div>
+      ${dropZoneLoaded('donor_list.xlsx', '312.4 KB · XLSX · OUTPUT: .xlsx (formatting preserved)')}
+      <div class="gap-22"></div>
+      <div class="da-section-label">PII TYPES</div>
+      <button class="da-btn block">[ SANITIZE ALL ]</button>
+      <div class="gap-12"></div>
+      ${piiGrid()}
+      <div class="gap-22"></div>
+      <button class="da-btn block">[ DETECT PII ]</button>
+    `);
+  }
+
+  /* ============================================================
+     Screen 3 - Detection running
+     ============================================================ */
+  function screen3() {
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">FILE</div>
+      ${dropZoneLoaded('donor_list.xlsx', '312.4 KB · XLSX · OUTPUT: .xlsx (formatting preserved)')}
+      <div class="gap-22"></div>
+      <div class="da-section-label">DETECTION</div>
+      ${progressSteps([
+        { glyph: '[x]', text: 'extracting document...',         kind: 'done' },
+        { glyph: '[x]', text: 'chunk 1/4: 8 pii found',         kind: 'done' },
+        { glyph: '[x]', text: 'chunk 2/4: 4 pii found',         kind: 'done' },
+        { glyph: '[>]', text: 'chunk 3/4: detecting pii',       kind: 'active', blink: true },
+        { glyph: '[ ]', text: 'chunk 4/4: pending',             kind: 'pending' },
+        { glyph: '[ ]', text: 'building replacement map',       kind: 'pending' },
+        { glyph: '[ ]', text: 'preparing preview',              kind: 'pending' },
+      ])}
+      <div class="gap-22"></div>
+      <div class="da-section-label">LOG</div>
+      ${logPanel(baseLog)}
+    `);
+  }
+
+  /* ============================================================
+     Screen 4 - Pre-scrub preview
+     ============================================================ */
+  function screen4() {
+    const previewBody =
+      `From: ${ph('PERSON_3A4F', 'Jane Smith')} <${ph('EMAIL_3A4F', 'jane.smith@school.org')}>\n` +
+      `To: ${ph('PERSON_11C2', 'Bob Torres')} <${ph('EMAIL_11C2', 'btorres@school.org')}>\n` +
+      `Subject: Q3 donor follow-up\n\n` +
+      `Bob,\n\n` +
+      `Thanks for the call earlier. ${ph('PERSON_3A4F', 'Jane Smith')} here at ${ph('ORG_8B0E', 'St. Theresa School')}.\n` +
+      `The pledge from ${ph('PERSON_5D72', 'Maria Alvarez')} came in today —\n` +
+      `please confirm receipt at ${ph('ADDRESS_5D72', '123 Main St, Austin TX 78701')}.\n` +
+      `Direct line is ${ph('PHONE_3A4F', '555-234-9988')}.\n\n` +
+      `— ${ph('PERSON_3A4F', 'Jane')}`;
+
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">PREVIEW — REVIEW BEFORE SCRUB</div>
+      <div class="da-preview-summary">
+        <span><b>DETECTED:</b> 12 entities</span>
+        <span><b>REPLACEMENTS:</b> 24</span>
+        <span><b>TYPES:</b> PERSON · EMAIL · PHONE · ADDRESS · ORG</span>
+      </div>
+      <div class="da-preview-body">${previewBody}</div>
+      <div class="gap-18"></div>
+      <div class="da-preview-actions">
+        <button class="da-btn">[ CONFIRM AND SCRUB ]</button>
+        <button class="da-btn secondary">[ CANCEL ]</button>
+        <span class="grow"></span>
+        <span class="da-preview-hint">Click any placeholder to deselect a false positive</span>
+      </div>
+    `);
+  }
+
+  /* ============================================================
+     Screen 5 - Scrubbing + verifying
+     ============================================================ */
+  function screen5() {
+    const scrubLog = baseLog.concat([
+      { ts: '2026-05-01T14:32:06Z', level: 'INFO', mod: '[scrub]',  msg: 'deep scrub: comments cleared, metadata zeroed' },
+      { ts: '2026-05-01T14:32:07Z', level: 'INFO', mod: '[verify]', msg: 'verification scan running...' },
+    ]);
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">SCRUB &amp; VERIFY</div>
+      ${progressSteps([
+        { glyph: '[x]', text: 'applying replacements...',                 kind: 'done' },
+        { glyph: '[x]', text: 'deep scrub: tracked changes stripped',     kind: 'done' },
+        { glyph: '[x]', text: 'deep scrub: comments cleared',             kind: 'done' },
+        { glyph: '[x]', text: 'deep scrub: metadata sanitized',           kind: 'done' },
+        { glyph: '[>]', text: 'verification scan running',                kind: 'active', blink: true },
+        { glyph: '[ ]', text: 'output ready',                             kind: 'pending' },
+      ])}
+      <div class="gap-22"></div>
+      <div class="da-section-label">LOG</div>
+      ${logPanel(scrubLog)}
+    `);
+  }
+
+  /* ============================================================
+     Screen 6 - Results, verified, downloads enabled
+     ============================================================ */
+  function screen6() {
+    const doneLog = baseLog.concat([
+      { ts: '2026-05-01T14:32:06Z', level: 'INFO', mod: '[scrub]',  msg: 'deep scrub: comments cleared, metadata zeroed' },
+      { ts: '2026-05-01T14:32:07Z', level: 'INFO', mod: '[verify]', msg: 'PASS — 0 residual matches' },
+      { ts: '2026-05-01T14:32:07Z', level: 'INFO', mod: '[writer]', msg: 'output: ~/doc-anonymizer/output/donors_anon_a3f9c1b2.xlsx' },
+      { ts: '2026-05-01T14:32:07Z', level: 'INFO', mod: '[key]',    msg: 'key file saved: donor_list_a3f9c1b2.key.json' },
+    ]);
+    return frame(`
+      ${statusBar()}
+      <div class="gap-18"></div>
+      ${tabs()}
+      <div class="gap-22"></div>
+      <div class="da-section-label">RESULTS</div>
+      ${results(true)}
+      <div class="gap-18"></div>
+      <div class="da-actions">
+        <button class="da-btn">[ DOWNLOAD FILE ]</button>
+        <button class="da-btn">[ DOWNLOAD KEY ]</button>
+        <button class="da-btn secondary">[ PUSH TO GITHUB ]</button>
+      </div>
+      <div class="gap-22"></div>
+      <div class="da-section-label">LOG</div>
+      ${logPanel(doneLog)}
+    `);
+  }
+
+  /* ---------- Mount: 6 artboards in a horizontal row ---------- */
+  const screens = [
+    { id: 's1', label: '01 · Empty',             render: screen1 },
+    { id: 's2', label: '02 · File loaded',       render: screen2 },
+    { id: 's3', label: '03 · Detecting',         render: screen3 },
+    { id: 's4', label: '04 · Preview',           render: screen4 },
+    { id: 's5', label: '05 · Scrubbing',         render: screen5 },
+    { id: 's6', label: '06 · Verified · Done',   render: screen6 },
+  ];
+
+  const grip = `
+    <span class="dc-grip">
+      <svg width="9" height="13" viewBox="0 0 9 13" fill="currentColor">
+        <circle cx="2" cy="2" r="1.1"/><circle cx="7" cy="2" r="1.1"/>
+        <circle cx="2" cy="6.5" r="1.1"/><circle cx="7" cy="6.5" r="1.1"/>
+        <circle cx="2" cy="11" r="1.1"/><circle cx="7" cy="11" r="1.1"/>
+      </svg>
+    </span>
+  `;
+
+  document.getElementById('row').innerHTML = screens.map(s => `
+    <div class="dc-slot">
+      <div class="dc-label">${grip}<span>${s.label}</span></div>
+      <div class="dc-card">${s.render()}</div>
+    </div>
+  `).join('');
+</script>
+
+</body>
+</html>
