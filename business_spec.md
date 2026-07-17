@@ -1,7 +1,7 @@
 # Business Spec: Doc Anonymizer
 
-**Last updated:** 2026-05-01  
-**Status:** v1 implementation complete - awaiting operator validation
+**Last updated:** 2026-07-17  
+**Status:** v1 implementation complete; web edition added; code review findings in CODE_REVIEW.md pending fixes
 
 ---
 
@@ -66,6 +66,32 @@ This is a document preparation tool, not an analysis tool. It anonymizes. It doe
 v1 ships with text-preserving output for PDF and PPTX (formatting not rebuilt). Full format-preserving output for XLSX, DOCX, and CSV. All other major formats extracted to text.
 
 v2 targets PDF rebuild with formatting preserved, and in-place PPTX scrubbing.
+
+---
+
+## Web Edition (added 2026-07-17)
+
+A second delivery channel: `web/index.html`, a single static page deployable to
+Netlify. It exists for the case where the operator is away from the machine
+running the local LLM but still needs to anonymize before pasting into a
+public LLM.
+
+The privacy guarantee holds by construction: the page is static, all
+processing happens inside the browser tab, and the deploy's security policy
+(connect-src 'none') makes network calls from the page impossible. The
+document never leaves the device.
+
+Differences from the local app, accepted as scope:
+
+- Detection is pattern-based (9 categories) plus an operator-supplied custom
+  terms list - not LLM-based. Weaker on names; the custom terms box and the
+  mandatory preview are the compensating controls.
+- Formats: txt, md, csv, docx, xlsx. No PDF.
+- Outputs three artifacts per run: the anonymized file, a human-readable
+  decoder ring (.txt), and a key.json interchangeable with the local app's
+  key files. Either the decoder ring or the key.json drives deanonymize.
+- Verification hard-blocks release only on actual replacement-map residue.
+  Generic pattern residue is a warning, not a dead end.
 
 ---
 
