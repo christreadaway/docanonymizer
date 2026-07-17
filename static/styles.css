@@ -397,6 +397,17 @@ select {
 .form .form-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
 .warn { color: var(--danger); font-size: 11px; }
 
+textarea {
+  background: var(--bg-inset); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 2px;
+  padding: 6px 10px;
+  font-family: var(--mono); font-size: 12px;
+  resize: vertical;
+}
+textarea:focus-visible { outline: 2px solid var(--border-focus); }
+
+.results .warnline { color: var(--warning); }
+
 /* ---------- Output ext note + warnings ---------- */
 .note { color: var(--warning); font-size: 12px; margin-top: 8px; }
 

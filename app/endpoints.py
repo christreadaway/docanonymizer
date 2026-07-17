@@ -140,7 +140,11 @@ def add_or_update(payload: dict) -> dict:
         "api_style": payload["api_style"],
         "model": payload["model"].strip(),
         "chunk_tokens": int(payload.get("chunk_tokens") or CHUNK_TOKENS),
+        "allow_nonlocal": bool(payload.get("allow_nonlocal")),
     }
+    if record["allow_nonlocal"]:
+        log.warning("NON-LOCAL endpoint saved: id=%s - document text will "
+                    "leave this machine when it is used", eid)
 
     found = False
     for i, ep in enumerate(state["endpoints"]):
@@ -189,6 +193,16 @@ def _validate_payload(p: dict) -> None:
     parsed = urlparse(p["base_url"])
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError("base_url must be a valid http(s) URL")
+    # Server-side locality guard (CODE_REVIEW H2). The browser warning alone
+    # is not enforcement - anything that hits this API directly must make the
+    # same explicit choice.
+    if not is_local_url(p["base_url"]) and not p.get("allow_nonlocal"):
+        raise ValueError(
+            "base_url is not a local address. This app only sends document "
+            "text to local LLM endpoints. To save a non-local endpoint anyway, "
+            "re-submit with allow_nonlocal=true - document text WILL leave "
+            "this machine."
+        )
 
 
 def is_local_url(url: str) -> bool:

@@ -190,15 +190,73 @@ def test_verifier_flags_residual_pii(tmp_path):
     assert "PERSON" in result.map_match_types
 
 
-def test_verifier_regex_catches_missed_pii(tmp_path):
-    """An email that wasn't in the map should be caught by the regex net."""
+def test_verifier_regex_net_warns_without_blocking(tmp_path):
+    """CODE_REVIEW C1: generic pattern hits are warnings, not hard failures.
+
+    The regexes can't tell a missed email from any address-shaped string, so
+    they surface for operator review instead of dead-ending the run.
+    """
     from app.verifier import verify_output
 
     out = tmp_path / "leaky.txt"
     out.write_text("contact rogue@external.com")  # no map entry
     result = verify_output(out, {})
+    assert result.passed is True
+    assert "EMAIL" in result.regex_match_types  # surfaced as a warning
+
+
+def test_verifier_no_false_positive_block_on_clean_doc(tmp_path):
+    """CODE_REVIEW C1 repro: invoice numbers and version strings must not
+    block a clean document, and must not even warn."""
+    from app.verifier import verify_output
+
+    out = tmp_path / "clean.txt"
+    out.write_text("Invoice 5124403981. Version 1.2.3.4 released. 100 units.")
+    result = verify_output(out, {"John Smith": "[PERSON_AAAA]"})
+    assert result.passed is True
+    assert result.regex_match_types == []
+
+
+def test_verifier_deep_scans_xlsx_formula_literals(tmp_path):
+    """CODE_REVIEW H3: PII living only inside a formula literal is invisible
+    to the cell extractor (data_only) but must still fail the map scan."""
+    from openpyxl import Workbook
+    from app.verifier import verify_output
+
+    leaky = tmp_path / "leaky.xlsx"
+    wb = Workbook()
+    wb.active["A1"] = '=CONCAT("Jane Smith", "!")'
+    wb.save(str(leaky))
+
+    result = verify_output(leaky, {"Jane Smith": "[PERSON_3A4F]"})
     assert result.passed is False
-    assert "EMAIL" in result.regex_match_types
+    assert "PERSON" in result.map_match_types
+
+
+def test_scrub_docx_replaces_split_runs(tmp_path):
+    """CODE_REVIEW C3 repro: Word splits strings across runs after edits.
+    The run-aware pass must still replace them, formatting preserved."""
+    from docx import Document
+    from app.scrubber import scrub_docx
+
+    src = tmp_path / "split.docx"
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run("Contact Ja")
+    r = p.add_run("ne Smith today")
+    r.bold = True
+    doc.save(str(src))
+
+    rmap = {"Jane Smith": "[PERSON_BBBB]"}
+    out = tmp_path / "split_anon.docx"
+    scrub_docx(src, rmap, out)
+
+    result = Document(str(out))
+    text = "\n".join(pp.text for pp in result.paragraphs)
+    assert "Jane Smith" not in text
+    assert "[PERSON_BBBB]" in text
+    # Runs outside the match keep their formatting.
+    assert any(run.bold for pp in result.paragraphs for run in pp.runs if "today" in run.text)
 
 
 def test_verifier_ignores_placeholders(tmp_path):

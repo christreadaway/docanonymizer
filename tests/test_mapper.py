@@ -105,3 +105,17 @@ def test_serializable_shape():
     assert set(rec["types"]) == {"PERSON", "EMAIL"}
     assert rec["values"]["PERSON"] == "Jane Smith"
     assert rec["values"]["EMAIL"] == "jane@x.org"
+
+
+def test_same_text_second_tag_keeps_first_placeholder():
+    """CODE_REVIEW M1: the placeholder must not flip when the LLM tags the
+    same string differently in a later chunk. First tag wins; the extra tag
+    is still recorded on the entity for the key file."""
+    from app.mapper import EntityRegistry
+    r = EntityRegistry()
+    first = r.add("St. Theresa", "ORG")
+    second = r.add("St. Theresa", "PERSON")
+    assert first == second
+    assert r.as_replacement_map()["St. Theresa"] == first
+    rec = next(iter(r.as_serializable().values()))
+    assert set(rec["types"]) == {"ORG", "PERSON"}

@@ -97,3 +97,23 @@ def test_atomic_write_no_partial_files(tmp_path):
     # The endpoints file is valid JSON.
     state = json.loads((tmp_path / "endpoints.json").read_text())
     assert "endpoints" in state
+
+
+def test_nonlocal_endpoint_rejected_without_flag():
+    """CODE_REVIEW H2: locality is enforced server-side, not just in the browser."""
+    from app import endpoints as ep
+    with pytest.raises(ValueError, match="not a local address"):
+        ep.add_or_update({
+            "nickname": "cloud", "base_url": "http://8.8.8.8:11434",
+            "api_style": "ollama", "model": "m",
+        })
+
+
+def test_nonlocal_endpoint_saved_with_explicit_flag():
+    from app import endpoints as ep
+    saved = ep.add_or_update({
+        "nickname": "cloud", "base_url": "http://8.8.8.8:11434",
+        "api_style": "ollama", "model": "m", "allow_nonlocal": True,
+    })
+    assert saved["allow_nonlocal"] is True
+    assert ep.delete(saved["id"]) is True

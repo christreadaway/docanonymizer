@@ -65,6 +65,129 @@ def apply_replacements_text(text: str, replacement_map: dict[str, str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Run-aware XML replacement (CODE_REVIEW C3)
+#
+# Word routinely splits a single string like "Jane Smith" across multiple
+# <w:r>/<w:t> runs after edits, so neither a per-run pass nor a raw string
+# substitution can see it. These helpers join the text runs of each paragraph
+# (or shared-string item), find matches in the joined text, and write the
+# placeholder back into the run where the match starts - removing the matched
+# characters from the following runs. Formatting outside the match survives.
+# ---------------------------------------------------------------------------
+
+_WP_BLOCK_RE = re.compile(r"<w:p[ >].*?</w:p>", re.DOTALL)
+_WT_RE = re.compile(r"<w:t((?:\s[^>]*)?)/>|<w:t((?:\s[^>]*)?)>(.*?)</w:t>", re.DOTALL)
+_SI_BLOCK_RE = re.compile(r"<si>.*?</si>", re.DOTALL)
+_IS_BLOCK_RE = re.compile(r"<is>.*?</is>", re.DOTALL)
+_T_RE = re.compile(r"<t((?:\s[^>]*)?)/>|<t((?:\s[^>]*)?)>(.*?)</t>", re.DOTALL)
+
+_DOCX_RUN_PARTS = re.compile(r"word/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml")
+_XLSX_SHEET_PARTS = re.compile(r"xl/worksheets/sheet\d*\.xml")
+
+_ENTITY_RE = re.compile(r"&(amp|lt|gt|quot|apos|#x?[0-9a-fA-F]+);")
+
+
+def _xml_unescape(s: str) -> str:
+    def repl(m: re.Match) -> str:
+        e = m.group(1)
+        table = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'"}
+        if e in table:
+            return table[e]
+        try:
+            code = int(e[2:], 16) if e[1] in "xX" else int(e[1:])
+            return chr(code)
+        except (ValueError, OverflowError):
+            return m.group(0)
+    return _ENTITY_RE.sub(repl, s)
+
+
+def _xml_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;").replace("'", "&apos;"))
+
+
+def _replace_in_blocks(xml: str, block_re: re.Pattern, t_re: re.Pattern,
+                       t_name: str, replacement_map: dict[str, str]) -> str:
+    """Apply the map inside each text-run block, spanning split runs."""
+
+    def process_block(bm: re.Match) -> str:
+        block = bm.group(0)
+        nodes = []  # (start, end, attrs, text)
+        for m in t_re.finditer(block):
+            attrs = m.group(1) if m.group(1) is not None else (m.group(2) or "")
+            inner = m.group(3) if m.group(3) is not None else ""
+            nodes.append((m.start(), m.end(), attrs, _xml_unescape(inner)))
+        if not nodes:
+            return block
+        joined = "".join(n[3] for n in nodes)
+        if not joined:
+            return block
+
+        # Claim non-overlapping ranges, longest originals first (map order).
+        ranges: list[tuple[int, int, str]] = []
+        for original, placeholder in replacement_map.items():
+            if not original:
+                continue
+            idx = 0
+            while True:
+                f = joined.find(original, idx)
+                if f == -1:
+                    break
+                end = f + len(original)
+                if not any(f < r_end and end > r_start for r_start, r_end, _ in ranges):
+                    ranges.append((f, end, placeholder))
+                    idx = end
+                else:
+                    idx = f + 1
+        if not ranges:
+            return block
+        ranges.sort()
+
+        # Map each joined-text character back to its owning node.
+        owner: list[int] = []
+        for i, n in enumerate(nodes):
+            owner.extend([i] * len(n[3]))
+
+        new_texts = [""] * len(nodes)
+        i = 0
+        r = 0
+        while i < len(joined):
+            if r < len(ranges) and ranges[r][0] == i:
+                new_texts[owner[i]] += ranges[r][2]
+                i = ranges[r][1]
+                r += 1
+            else:
+                new_texts[owner[i]] += joined[i]
+                i += 1
+
+        # Rebuild the block back-to-front so offsets stay valid.
+        rebuilt = block
+        for k in range(len(nodes) - 1, -1, -1):
+            start, end, attrs, _ = nodes[k]
+            if "xml:space" not in attrs:
+                attrs += ' xml:space="preserve"'
+            node_xml = f"<{t_name}{attrs}>{_xml_escape(new_texts[k])}</{t_name}>"
+            rebuilt = rebuilt[:start] + node_xml + rebuilt[end:]
+        return rebuilt
+
+    return block_re.sub(process_block, xml)
+
+
+def _structured_replace_docx(name: str, xml: str, replacement_map: dict[str, str]) -> str:
+    if _DOCX_RUN_PARTS.fullmatch(name):
+        return _replace_in_blocks(xml, _WP_BLOCK_RE, _WT_RE, "w:t", replacement_map)
+    return xml
+
+
+def _structured_replace_xlsx(name: str, xml: str, replacement_map: dict[str, str]) -> str:
+    if name == "xl/sharedStrings.xml":
+        return _replace_in_blocks(xml, _SI_BLOCK_RE, _T_RE, "t", replacement_map)
+    if _XLSX_SHEET_PARTS.fullmatch(name):
+        return _replace_in_blocks(xml, _IS_BLOCK_RE, _T_RE, "t", replacement_map)
+    return xml
+
+
+# ---------------------------------------------------------------------------
 # Format-specific writers
 # ---------------------------------------------------------------------------
 
@@ -122,17 +245,18 @@ def scrub_docx(working_path: Path, replacement_map: dict[str, str], out_path: Pa
                     _replace_runs(p.runs)
     doc.save(str(staged))
 
-    # Stage 2 - ZIP-level deep scrub.
+    # Stage 2 - ZIP-level deep scrub (run-aware pass handles split runs).
     layers = _deep_scrub_zip(
         staged,
         out_path,
         replacement_map=replacement_map,
+        structured_replace=_structured_replace_docx,
         per_part_handlers={
             "word/document.xml":   _strip_revision_marks,
             "word/header*.xml":    _strip_revision_marks,
             "word/footer*.xml":    _strip_revision_marks,
             "word/comments.xml":   _empty_comments_xml,
-            "word/commentsExtended.xml": _drop_part,
+            "word/commentsExtended.xml": _empty_comments_ex_xml,
             "docProps/core.xml":   _zero_core_authors,
             "docProps/app.xml":    _zero_app_company,
         },
@@ -180,8 +304,9 @@ def scrub_xlsx(working_path: Path, replacement_map: dict[str, str], out_path: Pa
         staged,
         out_path,
         replacement_map=replacement_map,
+        structured_replace=_structured_replace_xlsx,
         per_part_handlers={
-            re.compile(r"xl/comments\d*\.xml"): _drop_part,
+            re.compile(r"xl/comments\d*\.xml"): _empty_xlsx_comments_xml,
             "docProps/core.xml": _zero_core_authors,
             "docProps/app.xml":  _zero_app_company,
         },
@@ -203,18 +328,34 @@ def scrub_xlsx(working_path: Path, replacement_map: dict[str, str], out_path: Pa
 # Deep scrub primitives
 # ---------------------------------------------------------------------------
 
+def _augment_map_with_escapes(replacement_map: dict[str, str]) -> dict[str, str]:
+    """Add XML-escaped variants so originals containing & < > " ' are caught
+    in their encoded form inside XML parts. Order (longest-first) preserved."""
+    out: dict[str, str] = {}
+    for original, placeholder in replacement_map.items():
+        out[original] = placeholder
+        esc = _xml_escape(original)
+        if esc != original:
+            out[esc] = _xml_escape(placeholder)
+    return dict(sorted(out.items(), key=lambda kv: -len(kv[0])))
+
+
 def _deep_scrub_zip(
     src: Path,
     dst: Path,
     replacement_map: dict[str, str],
     per_part_handlers: dict | None = None,
+    structured_replace=None,
 ) -> list[str]:
     """Walk every part in `src`, run handlers and the raw map substitution, repack to `dst`.
 
+    `structured_replace(name, xml, map) -> xml` runs first on text parts - it
+    is the run-aware pass that catches strings split across XML runs.
     Returns a list of layer labels for logging.
     """
     per_part_handlers = per_part_handlers or {}
     layers_touched: set[str] = set()
+    raw_map = _augment_map_with_escapes(replacement_map)
 
     with zipfile.ZipFile(src, "r") as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
         for info in zin.infolist():
@@ -226,17 +367,23 @@ def _deep_scrub_zip(
                 layers_touched.add(f"drop:{info.filename}")
                 continue
 
-            # 1. Raw map substitution for any text / XML part. Apply first so the
-            #    metadata-zero handlers run on already-substituted text - any
-            #    placeholder that lands in author/company fields will then be
-            #    cleared by the explicit handler.
+            # 1. Structured (run-aware) replacement, then raw map substitution
+            #    for any text / XML part. Apply before the metadata-zero
+            #    handlers so any placeholder that lands in author/company
+            #    fields is then cleared by the explicit handler.
             if _is_text_part(info.filename):
                 try:
                     text = data.decode("utf-8")
-                    new_text = apply_replacements_text(text, replacement_map)
-                    if new_text != text:
-                        data = new_text.encode("utf-8")
+                    new_text = text
+                    if structured_replace is not None:
+                        new_text = structured_replace(info.filename, new_text, replacement_map)
+                        if new_text != text:
+                            layers_touched.add("run_aware_substitution")
+                    substituted = apply_replacements_text(new_text, raw_map)
+                    if substituted != new_text:
                         layers_touched.add("raw_xml_substitution")
+                    if substituted != text:
+                        data = substituted.encode("utf-8")
                 except UnicodeDecodeError:
                     pass
 
@@ -286,6 +433,18 @@ def _empty_comments_xml(name: str, data: bytes) -> tuple[bytes, str]:
     return empty, "comments_cleared"
 
 
+def _empty_comments_ex_xml(name: str, data: bytes) -> tuple[bytes, str]:
+    # Emptied rather than dropped: dropping leaves stale [Content_Types].xml
+    # and .rels references that can trigger Office repair prompts (M4).
+    empty = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w15:commentsEx xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"/>'
+    return empty, "comments_extended_cleared"
+
+
+def _empty_xlsx_comments_xml(name: str, data: bytes) -> tuple[bytes, str]:
+    empty = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors/><commentList/></comments>'
+    return empty, "xlsx_comments_cleared"
+
+
 def _strip_revision_marks(name: str, data: bytes) -> tuple[bytes, str]:
     """Remove <w:ins>/<w:del> elements while keeping the final text.
 
@@ -302,6 +461,11 @@ def _strip_revision_marks(name: str, data: bytes) -> tuple[bytes, str]:
     text = re.sub(r"</w:ins>", "", text)
     # Strip alt text descriptions that may carry names ("Photo of John")
     text = re.sub(r' descr="[^"]*"', '', text)
+    # Remove comment anchors - their comments part is emptied, so dangling
+    # references would otherwise risk repair prompts (M4).
+    text = re.sub(r"<w:commentRangeStart[^>]*/>", "", text)
+    text = re.sub(r"<w:commentRangeEnd[^>]*/>", "", text)
+    text = re.sub(r"<w:commentReference[^>]*/>", "", text)
 
     return text.encode("utf-8"), "tracked_changes_stripped"
 

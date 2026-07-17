@@ -101,12 +101,14 @@ The PRD listed six open questions. Three are resolved as built; three are deferr
 
 **Resolved:**
 
-1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after each session ends (success, failure, or cancel). `/output/` and `/keys/` are kept for the operator to manage manually - they are work product, not transient.
-2. **XLSX formulas containing PII.** Flag and warn, do not silently rewrite. The scrubber reports `formula_warnings` to the UI so the operator can decide whether to revise the formula by hand before sharing.
-3. **LLM timeout mid-chunk.** Log the failed chunk and continue. The post-scrub verifier is the safety net - any PII the LLM missed in a failed chunk will surface there, blocking download.
+1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after every terminal state - success, failure, or cancel - along with any LibreOffice conversion temp directory and staged scrub files. An output that fails verification still contains PII, so it is deleted too (quarantined), never left in `/output/`. Verified outputs and `/keys/` are kept - they are work product.
+2. **XLSX formulas containing PII.** The formula cell is not rewritten by the cell pass, but the deep XML pass replaces PII literals inside formula text, and the verifier scans raw sheet XML so formula content can never escape the map scan. `formula_warnings` still surface so the operator can confirm the formula still computes.
+3. **LLM timeout mid-chunk.** Retry the chunk (3 attempts with backoff), then abort the whole run. A skipped chunk would ship PII with no safety net - names and addresses have no regex shape the verifier could catch. The earlier "log and continue" behavior was a privacy hole and is gone.
+4. **False-positive regex matches in verification.** Verification now has two tiers. Any replacement-map original still present anywhere in the output is a hard fail that blocks release and deletes the output. Generic pattern hits (phone-shaped, IP-shaped strings) are warnings shown in the results panel - they cannot block, because any 10-digit invoice number or version string would otherwise dead-end a clean document.
+5. **Operator-added PII terms.** A CUSTOM TERMS box on the anonymize panel takes one term per line (optional `ORG:`-style type prefix). Terms found in the document are guaranteed catches regardless of what the LLM finds. This replaces the deferred highlight-and-tag preview UI with something simpler.
+6. **Endpoint locality.** Enforced server-side, not just in the browser. Saving a non-local endpoint requires an explicit override flag, and every LLM call to a non-local endpoint logs a loud warning.
 
 **Deferred to v2:**
 
-4. Optional AES-encrypted key files at rest.
-5. Whitelist UI for false-positive regex matches in verification (currently any regex hit fails the run; the operator must abort or retry).
-6. Manual highlight-and-tag UI in the preview panel for operator-added PII spans the LLM missed.
+7. Optional AES-encrypted key files at rest.
+8. In-place highlight-and-tag in the preview panel (custom terms cover the need for now).

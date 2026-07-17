@@ -129,9 +129,10 @@
     }
     for (const ep of endpoints) {
       const dot = create("span", { class: "dot unk", "data-id": ep.id, "aria-label": "status" });
+      const styleSpan = create("span", { class: "muted" });
+      styleSpan.textContent = `[${ep.api_style} | ${ep.model}]`;
       const meta = create("div", {}, [
-        create("div", {}, [document.createTextNode(`${ep.nickname} `),
-          create("span", { class: "muted", html: `[${ep.api_style} | ${ep.model}]` })]),
+        create("div", {}, [document.createTextNode(`${ep.nickname} `), styleSpan]),
         create("div", { class: "meta url" }, [document.createTextNode(ep.base_url)]),
       ]);
       const setActive = create("button", {
@@ -204,6 +205,16 @@
     } catch { return false; }
   }
 
+  // The server rejects non-local endpoints unless the payload carries an
+  // explicit allow_nonlocal flag - set it only after the operator confirms.
+  async function confirmNonlocal(payload) {
+    const isLocal = await checkLocalUrl(payload.base_url);
+    if (isLocal) return true;
+    if (!confirm("This URL is NON-LOCAL. Document text WILL be sent to an external server. Continue anyway?")) return false;
+    payload.allow_nonlocal = true;
+    return true;
+  }
+
   // ----- GitHub manager -----
   async function loadGithub() {
     const data = await api("/api/github");
@@ -214,9 +225,10 @@
     } else {
       for (const c of data.connections) {
         const dot = create("span", { class: "dot unk" });
+        const repoSpan = create("span", { class: "muted" });
+        repoSpan.textContent = `[${c.repo}@${c.branch}]`;
         const meta = create("div", {}, [
-          create("div", {}, [document.createTextNode(`${c.nickname} `),
-            create("span", { class: "muted", html: `[${c.repo}@${c.branch}]` })]),
+          create("div", {}, [document.createTextNode(`${c.nickname} `), repoSpan]),
           create("div", { class: "meta" },
             [document.createTextNode(c.token_set ? "PAT set: ***" : "PAT NOT SET")]),
         ]);
@@ -338,20 +350,25 @@
   }
 
   function bindDropzone(zoneId, inputId, onFile) {
+    // Bound once per zone; listeners delegate so the hidden <input> can be
+    // recreated by innerHTML rewrites without re-binding (listener-leak fix).
     const zone = $(zoneId);
-    const input = $(inputId);
-    zone.addEventListener("click", () => input.click());
+    if (zone.dataset.bound) return;
+    zone.dataset.bound = "1";
+    zone.addEventListener("click", () => { const inp = $(inputId); if (inp) inp.click(); });
     zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dragover"); });
     zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
     zone.addEventListener("drop", (e) => {
       e.preventDefault(); zone.classList.remove("dragover");
       if (e.dataTransfer.files[0]) {
-        input.files = e.dataTransfer.files;
+        const inp = $(inputId);
+        if (inp) { try { inp.files = e.dataTransfer.files; } catch {} }
         onFile(e.dataTransfer.files[0]);
       }
     });
-    input.addEventListener("change", (e) => {
-      if (e.target.files[0]) onFile(e.target.files[0]);
+    // "change" bubbles from the inner file input to the zone.
+    zone.addEventListener("change", (e) => {
+      if (e.target && e.target.files && e.target.files[0]) onFile(e.target.files[0]);
     });
   }
 
@@ -406,6 +423,7 @@
     const fd = new FormData();
     fd.append("file", file);
     fd.append("tags", selectedTags());
+    fd.append("custom_terms", $("custom-terms") ? $("custom-terms").value : "");
     const epId = $("endpoint-select").value;
     if (epId) fd.append("endpoint_id", epId);
 
@@ -600,10 +618,17 @@
     lines.push({ text: `COMPLETE: ${r.output_filename || "-"}` });
     if (verified) {
       lines.push({ text: "VERIFIED: 0 RESIDUAL PII DETECTED", cls: "verified" });
+      const warns = (r.verify_result && r.verify_result.warnings) || [];
+      if (warns.length) {
+        lines.push({ text: `[!] PATTERNS RESEMBLING ${warns.join(", ")} REMAIN`, cls: "warnline" });
+        lines.push({ text: `    These can be false alarms (any 10-digit number looks`, cls: "warnline" });
+        lines.push({ text: `    like a phone). Skim the output before sharing.`, cls: "warnline" });
+      }
     } else if (r.verify_result) {
-      const types = [...(r.verify_result.map_match_types || []), ...(r.verify_result.regex_match_types || [])];
-      lines.push({ text: `[!] VERIFICATION FAILED: ${r.verify_result.total_matches} matches`, cls: "failed" });
+      const types = r.verify_result.map_match_types || [];
+      lines.push({ text: `[!] VERIFICATION FAILED: ${r.verify_result.total_matches} original value(s) survived`, cls: "failed" });
       lines.push({ text: `MATCH TYPES: ${types.join(", ") || "-"}`, cls: "failed" });
+      lines.push({ text: `The unsafe output file was deleted. Nothing was released.`, cls: "failed" });
     }
     lines.push({ text: rule, cls: "rule" });
     const counts = r.counts || {};
@@ -779,6 +804,7 @@
     });
     $("btn-test-endpoint").addEventListener("click", async () => {
       const tmp = collectEndpointForm();
+      if (!(await confirmNonlocal(tmp))) return;
       // Save/test flow: do a synthetic health check via the endpoint.
       try {
         const resp = await fetch("/api/endpoints", {
@@ -804,8 +830,7 @@
     $("form-endpoint").addEventListener("submit", async (e) => {
       e.preventDefault();
       const payload = collectEndpointForm();
-      const isLocal = await checkLocalUrl(payload.base_url);
-      if (!isLocal && !confirm("This URL is non-local. The document content may be sent externally. Save anyway?")) return;
+      if (!(await confirmNonlocal(payload))) return;
       try {
         await api("/api/endpoints", { method: "POST", body: JSON.stringify(payload) });
         closeEndpointForm();

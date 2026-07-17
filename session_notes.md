@@ -367,3 +367,86 @@ Plus a Playwright live UI smoke run with a stand-in mock Ollama on port 11434 (a
    paragraph-aware replacement).
 2. H1 temp-file cleanup to match what business_spec.md already promises.
 3. Deploy `web/` to Netlify (operator action - see README).
+
+---
+
+## 2026-07-17 (later) - Local app hardened; direction confirmed local-first
+
+Operator direction mid-session - deploy stays local. The local Flask app IS
+the browser experience (run it on the Mac, use it at localhost:5000), so all
+robustness work landed there. The web/ folder remains in the repo as an
+optional extra but nothing depends on deploying it.
+
+### What was built or changed
+
+Every critical and high finding from CODE_REVIEW.md is fixed, plus most
+mediums and the low-hanging lows:
+
+- **C1 verifier policy.** Map residue (actual detected PII still present)
+  hard-fails and blocks release. Generic regex hits are warnings shown in the
+  results panel - clean documents with invoice numbers or version strings are
+  no longer dead-ended. Patterns tightened: phones need separators, IP octets
+  range-checked and version-like strings skipped, card numbers Luhn-checked.
+- **C2 chunk failures.** Each chunk retries 3x with backoff, then the whole
+  run aborts with a clear error. No more silent skips. Upload is deleted on
+  abort. business_spec decision 3 rewritten to match.
+- **C3 split runs.** New run-aware XML replacement pass (ported from the web
+  edition) joins each paragraph's text runs, finds matches across run
+  boundaries, and writes placeholders back preserving formatting. Applied to
+  DOCX body/headers/footers/footnotes/endnotes/comments and XLSX shared
+  strings and inline strings.
+- **H1 temp hygiene.** cleanup_session_files() runs on every terminal state:
+  uploads, LibreOffice conversion tempdirs, staged files, and failed outputs
+  (quarantine - a failed-verify output still contains PII) are all deleted.
+  Completion signals (error / verify_result) are set only after cleanup so
+  the UI never observes a half-cleaned state. Unanonymize cleans its
+  conversion dirs too and no longer overwrites earlier restores.
+- **H2 endpoint locality.** Server rejects non-local endpoint URLs unless the
+  payload carries allow_nonlocal=true; the browser sets that flag only after
+  an explicit confirm. Every LLM call to a non-local endpoint logs a loud
+  warning.
+- **H3 formula blindness.** Verifier now also scans the raw XML of every part
+  in DOCX/XLSX outputs (tags stripped), so formula literals, alt text, and
+  metadata can never escape the map scan.
+- **M1** stable placeholders (first tag wins, extra tags recorded on the
+  entity). **M2** preview spans claim non-overlapping regions longest-first.
+  **M3** registry listing in prompts capped at 40 entities. **M4** comments
+  parts emptied instead of dropped, comment anchors stripped from
+  document.xml. **M5** extraction now reads footnotes/endnotes/text boxes, so
+  PII there reaches detection. **M6** image-only PDFs error clearly instead
+  of releasing an empty "verified" output.
+- **Custom terms in the local UI.** Textarea on the anonymize panel, one term
+  per line, optional TAG: prefix. Terms present in the document are
+  guaranteed catches even if the LLM misses them.
+- Frontend: dropzone listener leak fixed (event delegation, bound once),
+  endpoint/github rows no longer inject via innerHTML, results panel shows
+  verification warnings distinctly from failures.
+
+### Tests run
+
+- Backend suite grown 61 -> 76, all passing across repeated runs. New
+  coverage: verifier warning policy + false-positive repro, deep XML formula
+  scan, split-run DOCX scrub with formatting check, detector retry + abort,
+  temp hygiene on success/failure/cancel, output quarantine, double-confirm
+  no-op, custom terms, non-local endpoint guard, stable tags, text box
+  extraction + scrub.
+- Live browser end-to-end (Playwright + real Flask + mock Ollama): 13 checks
+  passing - custom terms flow, no false-positive block, downloads, on-screen
+  text, byte-identical unanonymize round trip, uploads/ empty after run,
+  non-local endpoint refused after declining the warning. Log verified free
+  of PII values afterward.
+- Fixed a test-suite flake: pipeline worker threads could outlive their test;
+  completion signals now set after cleanup and conftest joins stragglers.
+
+### Open issues
+
+- Sessions never expire from server memory (fine for a single-user local
+  tool; restart clears).
+- /api/unanonymize/download/<name> serves any file in output/ by name.
+- PPTX rebuild and PDF format-preserving output remain v2 scope.
+
+### Next steps
+
+1. Operator validation run on real documents with the local LLM.
+2. Consider porting the run-aware pass to PPTX slide XML when PPTX rebuild
+   lands in v2.

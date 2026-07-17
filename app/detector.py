@@ -24,6 +24,9 @@ from .mapper import TAG_ORDER, VALID_TAGS, EntityRegistry
 
 log = get_logger("detector")
 
+_CHUNK_ATTEMPTS = 3          # LLM tries per chunk before the run is aborted
+_REGISTRY_PROMPT_CAP = 40    # most-recent entities listed in each chunk prompt
+
 
 PROMPT_TEMPLATE = """\
 You are a PII (personally identifiable information) extractor. Read the document chunk below and return EVERY occurrence of PII as a JSON array.
@@ -74,11 +77,17 @@ _TAG_HELP = {
 def _build_prompt(chunk: str, allowed: list[str], registry: EntityRegistry) -> str:
     tag_lines = [f"  {t}: {_TAG_HELP[t]}" for t in allowed]
     if registry.entities:
+        # Cap the listing so long, name-dense documents can't blow the prompt
+        # past the chunk budget (CODE_REVIEW M3). Most recent entities win -
+        # they're the likeliest to recur in the next chunk.
+        items = list(registry.entities.items())[-_REGISTRY_PROMPT_CAP:]
         reg_lines = []
-        for hex_id, by_tag in registry.entities.items():
+        for hex_id, by_tag in items:
             ex = next(iter(by_tag.values()), "")
             reg_lines.append(f"  {hex_id}: tags={','.join(sorted(by_tag))} example={ex!r}")
         registry_repr = "\n".join(reg_lines)
+        if len(registry.entities) > _REGISTRY_PROMPT_CAP:
+            registry_repr += f"\n  (+{len(registry.entities) - _REGISTRY_PROMPT_CAP} earlier entities omitted)"
     else:
         registry_repr = "  (empty)"
     return PROMPT_TEMPLATE.format(
@@ -165,14 +174,33 @@ def detect_pii(
         prompt = _build_prompt(chunk, allowed, registry)
         tokens = count_tokens(prompt)
         started = time.monotonic()
-        try:
-            raw = llm.llm_call(prompt, endpoint=ep)
-        except llm.LLMError as exc:
-            log.error("chunk %d/%d LLM error: %s", idx, len(chunks), exc)
+        # A chunk that can't be scanned means PII may ship unscrubbed - the
+        # regex verifier can't catch names or addresses. Retry, then fail the
+        # whole run rather than silently skipping (CODE_REVIEW C2).
+        raw = None
+        last_exc: Optional[llm.LLMError] = None
+        for attempt in range(1, _CHUNK_ATTEMPTS + 1):
+            try:
+                raw = llm.llm_call(prompt, endpoint=ep)
+                break
+            except llm.LLMError as exc:
+                last_exc = exc
+                log.warning("chunk %d/%d LLM error (attempt %d/%d): %s",
+                            idx, len(chunks), attempt, _CHUNK_ATTEMPTS, exc)
+                if attempt < _CHUNK_ATTEMPTS:
+                    time.sleep(attempt)  # 1s, 2s backoff
+        if raw is None:
+            log.error("chunk %d/%d failed after %d attempts - aborting detection",
+                      idx, len(chunks), _CHUNK_ATTEMPTS)
             if on_chunk:
                 on_chunk({"index": idx, "total": len(chunks), "tokens": tokens,
-                          "found": 0, "elapsed_s": time.monotonic() - started, "error": str(exc)})
-            continue
+                          "found": 0, "elapsed_s": time.monotonic() - started,
+                          "error": str(last_exc)})
+            raise llm.LLMError(
+                f"chunk {idx}/{len(chunks)} could not be scanned after "
+                f"{_CHUNK_ATTEMPTS} attempts ({last_exc}). Detection aborted - "
+                "an unscanned chunk would ship PII unscrubbed."
+            )
         items = _extract_json_array(raw)
         registry.merge_chunks(items)
         elapsed = time.monotonic() - started

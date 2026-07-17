@@ -2,6 +2,17 @@
 
 Date: 2026-07-17
 Scope: full backend (`app/`), frontend (`static/`, `templates/`), tests, config.
+
+## Status update (same day, follow-up session)
+
+All critical and high findings below are FIXED and regression-tested
+(76 backend tests + a live browser end-to-end run). Per finding:
+C1, C2, C3, H1, H2, H3 fixed. M1, M2, M3, M4, M5, M6 fixed. Low items fixed:
+listener leak, innerHTML injection, github non-JSON error body, restore
+overwrite. Still open (accepted for now): sessions never expire from memory
+(single-user tool, restart clears), and `/api/unanonymize/download/<name>`
+serves any file in `output/` by name. The verification policy change (regex
+residue warns instead of blocking) is reflected in `business_spec.md`.
 Method: line-by-line read of all modules, full test run (61/61 passing), plus
 targeted repro scripts for every finding marked CONFIRMED below.
 

@@ -20,6 +20,18 @@ from .scrubber import scrub_csv, scrub_docx, scrub_text, scrub_xlsx
 log = get_logger("unanon")
 
 
+def _unique_path(base: Path) -> Path:
+    """Never silently overwrite an earlier restore."""
+    if not base.exists():
+        return base
+    i = 1
+    while True:
+        candidate = base.with_name(f"{base.stem}_{i}{base.suffix}")
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
 def reverse_map(replacement_map: dict[str, str]) -> dict[str, str]:
     """Invert and sort longest-placeholder-first."""
     inverted = {placeholder: original for original, placeholder in replacement_map.items()}
@@ -37,24 +49,29 @@ def unanonymize_file(input_path: Path, key_payload: dict) -> Path:
     out_ext = extracted.output_ext
 
     base = key_payload.get("original_filename") or input_path.name
-    out_name = f"{Path(base).stem}_restored{out_ext}"
-    out_path = OUTPUT_DIR / out_name
+    out_path = _unique_path(OUTPUT_DIR / f"{Path(base).stem}_restored{out_ext}")
 
     log.info(
         "unanonymize start: input_suffix=%s output=%s entities=%d",
-        suffix, out_name, len(key_payload.get("entity_registry") or {}),
+        suffix, out_path.name, len(key_payload.get("entity_registry") or {}),
     )
 
-    if suffix in ("xlsx", "xls", "ods"):
-        result = scrub_xlsx(extracted.working_path, rmap, out_path)
-    elif suffix in ("docx", "doc", "odt"):
-        result = scrub_docx(extracted.working_path, rmap, out_path)
-    elif suffix == "csv":
-        result = scrub_csv(extracted, rmap, out_path)
-    else:  # txt / rtf / html / pdf / pptx / etc - text output
-        # If the input is a previously-anonymized .txt that we need to invert,
-        # treat it as text directly even if its source was PDF/PPTX.
-        result = scrub_text(extracted, rmap, out_path)
+    try:
+        if suffix in ("xlsx", "xls", "ods"):
+            result = scrub_xlsx(extracted.working_path, rmap, out_path)
+        elif suffix in ("docx", "doc", "odt"):
+            result = scrub_docx(extracted.working_path, rmap, out_path)
+        elif suffix == "csv":
+            result = scrub_csv(extracted, rmap, out_path)
+        else:  # txt / rtf / html / pdf / pptx / etc - text output
+            # If the input is a previously-anonymized .txt that we need to invert,
+            # treat it as text directly even if its source was PDF/PPTX.
+            result = scrub_text(extracted, rmap, out_path)
+    finally:
+        # LibreOffice conversion dirs must not outlive the run (temp hygiene).
+        wp = extracted.working_path
+        if wp and wp != input_path and Path(wp).parent.name.startswith("docanon-conv-"):
+            shutil.rmtree(Path(wp).parent, ignore_errors=True)
 
     log.info("unanonymize complete: out=%s bytes=%d", out_path.name, result.bytes_written)
     return result.output_path
