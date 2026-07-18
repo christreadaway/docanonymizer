@@ -307,27 +307,26 @@
       } else {
         const cb = create("input", { type: "checkbox", "data-tag": tag });
         cb.checked = true;
-        cb.disabled = state.sanitizeAll;
-        cb.addEventListener("change", refreshDetectButton);
+        cb.addEventListener("change", onPiiCheckboxChange);
         cell.append(cb);
       }
     });
     updateSanitizeAllButton();
   }
+  function allTypesChecked() {
+    const cbs = [...document.querySelectorAll(".pii-row input[type=checkbox]")];
+    return cbs.length > 0 && cbs.every((cb) => cb.checked);
+  }
+  function onPiiCheckboxChange() {
+    state.sanitizeAll = allTypesChecked();
+    updateSanitizeAllButton();
+  }
   function updateSanitizeAllButton() {
+    // Solid button = everything selected (sanitize-all). Outlined = a subset
+    // is selected; clicking it re-checks every type.
     const btn = $("btn-sanitize-all");
-    if (state.sanitizeAll) {
-      btn.classList.remove("secondary");
-      btn.textContent = "[ SANITIZE ALL ]";
-    } else {
-      btn.classList.add("secondary");
-      btn.textContent = "[ CHOOSE PII TYPES ]";
-    }
-    // toggle disabled state on the visible checkboxes
-    document.querySelectorAll(".pii-row input[type=checkbox]").forEach((cb) => {
-      cb.disabled = state.sanitizeAll;
-      if (state.sanitizeAll) cb.checked = true;
-    });
+    btn.classList.toggle("secondary", !state.sanitizeAll);
+    btn.textContent = "[ SANITIZE ALL ]";
   }
 
   function selectedTags() {
@@ -344,18 +343,15 @@
   }
 
   // ----- File handling -----
-  function refreshDetectButton() {
-    const has = !!$("file-input").files[0];
-    $("btn-detect").disabled = !has;
-  }
-
   function bindDropzone(zoneId, inputId, onFile) {
     // Bound once per zone; listeners delegate so the hidden <input> can be
     // recreated by innerHTML rewrites without re-binding (listener-leak fix).
     const zone = $(zoneId);
     if (zone.dataset.bound) return;
     zone.dataset.bound = "1";
-    zone.addEventListener("click", () => { const inp = $(inputId); if (inp) inp.click(); });
+    // No click handler here: the zone is a <label> wrapping the file input,
+    // so the browser opens the picker natively. A manual inp.click() would
+    // fire a second activation and the picker opens twice per click.
     zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("dragover"); });
     zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
     zone.addEventListener("drop", (e) => {
@@ -861,9 +857,10 @@
       } catch (exc) { alert(`Save failed: ${exc.message}`); }
     });
 
-    // PII / SANITIZE ALL toggle
+    // SANITIZE ALL re-selects every PII type.
     $("btn-sanitize-all").addEventListener("click", () => {
-      state.sanitizeAll = !state.sanitizeAll;
+      document.querySelectorAll(".pii-row input[type=checkbox]").forEach((cb) => { cb.checked = true; });
+      state.sanitizeAll = true;
       updateSanitizeAllButton();
     });
 

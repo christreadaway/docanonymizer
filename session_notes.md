@@ -450,3 +450,47 @@ mediums and the low-hanging lows:
 1. Operator validation run on real documents with the local LLM.
 2. Consider porting the run-aware pass to PPTX slide XML when PPTX rebuild
    lands in v2.
+
+---
+
+## Session 005 - 2026-07-18 (Claude Code, branch `claude/file-attach-anonymize-bugs-ei75qt`)
+
+**Type:** Bug fixes (local Flask app frontend)
+
+### What Was Done
+
+Fixed two UI bugs reported from live use:
+
+1. **Attach file needed two tries.** The dropzone is a `<label>` wrapping the
+   file input, so the browser opens the file picker natively on click - but the
+   JS also called `input.click()` on the same click, firing the picker twice.
+   Removed the manual click forwarding; one click now opens exactly one picker.
+   Confirmed with Playwright against a live server: old code fired 2 picker
+   activations per click, fixed code fires 1.
+
+2. **PII type checkboxes showed the not-allowed cursor and could not be
+   clicked.** The app started in SANITIZE ALL mode which set `disabled` on every
+   checkbox, and the unlock (clicking the SANITIZE ALL button to switch modes)
+   was undiscoverable. Reworked the model: checkboxes are always enabled and all
+   checked by default. Unchecking any box drops out of sanitize-all
+   automatically (button goes outlined); clicking [ SANITIZE ALL ] re-checks
+   everything (button goes solid). Removed the dead disabled-cursor CSS and the
+   unused refreshDetectButton helper.
+
+### Decisions / Assumptions
+
+- Sensitive-tier rows (GRADE, MEDICAL, etc.) still show [SENSITIVE] with no
+  checkbox - they are always scrubbed by design, unchanged.
+- The web edition (`web/index.html`) has neither bug (input sits outside the
+  dropzone div, checkboxes never disabled) - no changes there.
+
+### Tests Run
+
+- Playwright live-browser checks, 8/8 passing: single picker activation per
+  click, file attaches and DETECT enables after one pick, zero disabled
+  checkboxes, uncheck/re-check flows, button state, row-label toggling.
+- Backend suite: 76 passed.
+
+### Next Steps
+
+1. Operator re-test of the attach and PII selection flow on the Mac.
