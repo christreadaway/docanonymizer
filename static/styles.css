@@ -250,7 +250,6 @@ select {
 .pii-row input[type=checkbox]:checked::after {
   content: ""; position: absolute; inset: 2px; background: var(--text-primary);
 }
-.pii-row input[type=checkbox][disabled] { cursor: not-allowed; }
 
 /* ---------- Progress steps ---------- */
 .progress {
