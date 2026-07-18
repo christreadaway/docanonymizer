@@ -211,6 +211,51 @@ def _extract_xlsx(path: Path) -> ExtractResult:
     )
 
 
+_TXBX_RE = re.compile(r"<w:txbxContent>.*?</w:txbxContent>", re.DOTALL)
+_WT_TEXT_RE = re.compile(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", re.DOTALL)
+_DOCX_HDRFTR_RE = re.compile(r"word/(?:header|footer)\d*\.xml")
+
+
+def _xml_unescape_min(s: str) -> str:
+    return (s.replace("&lt;", "<").replace("&gt;", ">")
+             .replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&"))
+
+
+def _wt_paragraph_texts(xml: str) -> list[str]:
+    out = []
+    for para in xml.split("</w:p>"):
+        runs = _WT_TEXT_RE.findall(para)
+        if runs:
+            out.append(_xml_unescape_min("".join(runs)))
+    return out
+
+
+def _docx_hidden_layer_text(path: Path) -> str:
+    """Text python-docx cannot see: footnotes, endnotes, text boxes.
+
+    Without this, PII living only in those layers never reaches detection,
+    so it is never mapped, scrubbed, or verified (CODE_REVIEW M5).
+    """
+    import zipfile
+    chunks: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            for part in ("word/footnotes.xml", "word/endnotes.xml"):
+                if part in names:
+                    xml = zf.read(part).decode("utf-8", errors="ignore")
+                    chunks.extend(_wt_paragraph_texts(xml))
+            for part in names:
+                if part == "word/document.xml" or _DOCX_HDRFTR_RE.fullmatch(part):
+                    xml = zf.read(part).decode("utf-8", errors="ignore")
+                    for box in _TXBX_RE.findall(xml):
+                        chunks.extend(_wt_paragraph_texts(box))
+    except Exception as exc:  # hidden layers are additive - never fail extraction
+        log.warning("hidden-layer scan skipped: %s", type(exc).__name__)
+        return ""
+    return "\n".join(c for c in chunks if c.strip())
+
+
 def _extract_docx(path: Path) -> ExtractResult:
     from docx import Document  # python-docx
 
@@ -234,6 +279,10 @@ def _extract_docx(path: Path) -> ExtractResult:
                     if p.text:
                         text_parts.append(p.text)
 
+    hidden = _docx_hidden_layer_text(path)
+    if hidden:
+        text_parts.append(hidden)
+
     text = "\n".join(text_parts)
     return ExtractResult(
         text=text,
@@ -253,6 +302,13 @@ def _extract_pdf(path: Path) -> ExtractResult:
             t = page.extract_text() or ""
             text_parts.append(t)
     text = "\n".join(text_parts)
+    if page_count and not text.strip():
+        # A scanned/image PDF would otherwise sail through with "no PII found"
+        # and release an empty output as verified (CODE_REVIEW M6).
+        raise ExtractError(
+            "this PDF has no extractable text - it looks like a scanned or "
+            "image-only PDF. OCR is not supported in v1."
+        )
     return ExtractResult(text=text, char_count=len(text), page_count=page_count)
 
 

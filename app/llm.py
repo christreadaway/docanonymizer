@@ -36,6 +36,12 @@ def llm_call(prompt: str, endpoint: Optional[dict] = None, timeout: int = _DEFAU
     if not base or not model:
         raise LLMError("endpoint missing base_url or model")
 
+    if not endpoints_mod.is_local_url(base):
+        # Loud, every call - the privacy mandate says local-only, and this is
+        # the last checkpoint before document text goes on the wire.
+        log.warning("NON-LOCAL LLM endpoint in use: nickname=%s - document "
+                    "text is leaving this machine", ep.get("nickname"))
+
     started = time.monotonic()
     if style == "ollama":
         text = _call_ollama(base, model, prompt, timeout)

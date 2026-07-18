@@ -199,8 +199,12 @@ def push_file(conn: dict, file_path: Path, dest_path: Optional[str] = None,
 
     if resp.status_code not in (200, 201):
         log.error("github push http %s", resp.status_code)
+        try:
+            message = (resp.json() or {}).get("message")
+        except ValueError:  # non-JSON error body
+            message = (resp.text or "")[:200]
         return {"status": "err", "http_status": resp.status_code,
-                "message": (resp.json() or {}).get("message")}
+                "message": message}
 
     payload = resp.json()
     sha = (payload.get("content") or {}).get("sha")

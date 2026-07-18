@@ -67,8 +67,12 @@ class EntityRegistry:
         if not text:
             raise ValueError("empty PII text")
 
-        # Already registered as the same tag - nothing to do.
-        if text in self.replacements and self.replacements[text].startswith(f"[{tag}_"):
+        # Already registered - first tag wins so the placeholder stays stable
+        # regardless of LLM output order (CODE_REVIEW M1). The extra tag is
+        # still recorded on the entity for the key file.
+        if text in self.replacements:
+            hex_id = self.text_to_hex[text]
+            self.entities.setdefault(hex_id, {}).setdefault(tag, text)
             return self.replacements[text]
 
         # Resolve a hex id.

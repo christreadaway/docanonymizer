@@ -97,3 +97,52 @@ The test suite mocks the LLM and runs against an isolated temp directory. No net
 - `/uploads/` is purged after each session.
 - `github.json` holds the GitHub PAT and is in `.gitignore`. Never commit it.
 - Download and GitHub push are blocked until the post-scrub verification pass returns zero residual matches.
+
+---
+
+## Web edition (Netlify)
+
+`web/index.html` is a second, standalone version of the tool - one HTML file
+with zero dependencies that runs entirely inside the browser tab. Nothing is
+ever uploaded: the "site" is just static code, and the deploy's security policy
+(`connect-src 'none'` in `netlify.toml`) makes it technically impossible for
+the page to send your document anywhere. Close the tab and nothing remains.
+
+How it differs from the local app:
+
+| | Local app | Web edition |
+|---|---|---|
+| PII detection | Local LLM (17 categories) | Pattern matching (9 categories) + your custom terms list |
+| Formats | pdf docx xlsx csv txt + more | txt md csv docx xlsx |
+| Where it runs | Your Mac | Any browser, still 100% on-device |
+| Outputs | Anonymized file + key.json | Anonymized file + decoder ring .txt + key.json |
+
+Pattern matching is weaker than an LLM at spotting names, so the web edition
+adds a CUSTOM TERMS box - paste the names and organizations you know are in the
+document and they are guaranteed to be caught. The preview step still shows
+every match for you to confirm or reject before anything is produced.
+
+Key files are interchangeable: a key.json produced by the web edition works in
+the local app's unanonymize tab, and vice versa.
+
+### Deploy to Netlify (one-time, ~2 minutes)
+
+Option A - drag and drop, no account linking:
+
+1. Go to https://app.netlify.com/drop
+2. Drag the `web` folder from this repo onto the page
+3. Done. Netlify gives you a URL immediately.
+
+Option B - connect the repo (auto-redeploys when the code changes):
+
+1. Netlify dashboard: Add new site > Import an existing project
+2. Pick GitHub and select `christreadaway/docanonymizer`
+3. Netlify reads `netlify.toml` automatically (publish dir: `web`, no build command)
+4. Deploy
+
+To test locally before deploying, just open the file in a browser:
+
+```bash
+cd ~/doc-anonymizer
+open web/index.html
+```

@@ -222,6 +222,19 @@ def create_app() -> Flask:
         ep_id = request.form.get("endpoint_id")
         endpoint = endpoints_mod.get(ep_id) if ep_id else None
 
+        # Operator-supplied custom terms: one per line, optional "TAG: " prefix
+        # (default PERSON). Guaranteed catches on top of LLM detection.
+        custom_terms: list[tuple[str, str]] = []
+        for line in (request.form.get("custom_terms") or "").splitlines():
+            s = line.strip()
+            if not s:
+                continue
+            head, sep, rest = s.partition(":")
+            if sep and head.strip().upper() in VALID_TAGS and rest.strip():
+                custom_terms.append((head.strip().upper(), rest.strip()))
+            else:
+                custom_terms.append(("PERSON", s))
+
         # Save upload to /uploads with a session-prefixed name.
         sid_holder: dict = {}
         upload_path = UPLOADS_DIR / safe
@@ -237,7 +250,8 @@ def create_app() -> Flask:
         log.info("upload received: name=%s size=%d type=%s",
                  upload_path.name, upload_path.stat().st_size, suffix)
 
-        sess = pipeline.new_session(upload_path, safe, allowed, endpoint=endpoint)
+        sess = pipeline.new_session(upload_path, safe, allowed, endpoint=endpoint,
+                                    custom_terms=custom_terms)
         sid_holder["sid"] = sess.id
 
         # Run extract + detect in a worker so the HTTP call returns immediately.
@@ -306,12 +320,14 @@ def create_app() -> Flask:
     @app.get("/api/anonymize/<sid>/download/file")
     def anon_dl_file(sid: str):
         sess = pipeline.get_session(sid)
-        if not sess or not sess.output_path or not sess.output_path.exists():
+        if not sess or not sess.output_path:
             abort(404)
+        # Verification gate first: a quarantined (deleted) failed output still
+        # reads as "blocked", not "not found".
         if not sess.verify_result or not sess.verify_result.get("passed"):
             abort(403)
-        # After download, clean up the temp upload (output stays in /output).
-        pipeline.cleanup_upload(sess)
+        if not sess.output_path.exists():
+            abort(404)
         return send_file(sess.output_path, as_attachment=True)
 
     @app.get("/api/anonymize/<sid>/text")
@@ -322,10 +338,12 @@ def create_app() -> Flask:
         the post-scrub verification pass succeeds (PRD 5.10).
         """
         sess = pipeline.get_session(sid)
-        if not sess or not sess.output_path or not sess.output_path.exists():
+        if not sess or not sess.output_path:
             abort(404)
         if not sess.verify_result or not sess.verify_result.get("passed"):
             abort(403)
+        if not sess.output_path.exists():
+            abort(404)
         try:
             text = pipeline.anonymized_text(sess)
         except RuntimeError as exc:
@@ -339,10 +357,12 @@ def create_app() -> Flask:
     @app.get("/api/anonymize/<sid>/download/key")
     def anon_dl_key(sid: str):
         sess = pipeline.get_session(sid)
-        if not sess or not sess.key_path or not sess.key_path.exists():
+        if not sess or not sess.key_path:
             abort(404)
         if not sess.verify_result or not sess.verify_result.get("passed"):
             abort(403)
+        if not sess.key_path.exists():
+            abort(404)
         return send_file(sess.key_path, as_attachment=True)
 
     @app.post("/api/anonymize/<sid>/cancel")
@@ -446,8 +466,10 @@ def _preview_payload(sess) -> dict:
         head = head[:10_000]
         truncated = True
     spans: list[dict] = []
-    # Build span list using the longest-first ordered map so positions reflect
-    # real replacements.
+    # Longest-first map order, claiming non-overlapping regions - a shorter
+    # original that is a substring of a longer one can't garble the preview
+    # (CODE_REVIEW M2). Mirrors how the scrubber actually applies the map.
+    claimed: list[tuple[int, int]] = []
     rmap = sess.registry.as_replacement_map()
     for original, placeholder in rmap.items():
         if not original:
@@ -457,13 +479,18 @@ def _preview_payload(sess) -> dict:
             found = head.find(original, idx)
             if found == -1:
                 break
-            spans.append({
-                "start": found,
-                "end": found + len(original),
-                "original": original,
-                "placeholder": placeholder,
-            })
-            idx = found + len(original)
+            end = found + len(original)
+            if not any(found < c_end and end > c_start for c_start, c_end in claimed):
+                spans.append({
+                    "start": found,
+                    "end": end,
+                    "original": original,
+                    "placeholder": placeholder,
+                })
+                claimed.append((found, end))
+                idx = end
+            else:
+                idx = found + 1
     spans.sort(key=lambda s: s["start"])
     return {
         "text_head": head,

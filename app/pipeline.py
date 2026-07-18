@@ -7,6 +7,7 @@ live in memory only - this is a single-user local tool.
 
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 import uuid
@@ -38,6 +39,7 @@ class Session:
     original_filename: str
     endpoint: dict
     allowed_tags: list[str] = field(default_factory=list)
+    custom_terms: list[tuple[str, str]] = field(default_factory=list)  # (tag, text)
     extract: Optional[ExtractResult] = None
     registry: Optional[EntityRegistry] = None
     detection_progress: list[dict] = field(default_factory=list)
@@ -52,7 +54,8 @@ class Session:
 
 
 def new_session(upload_path: Path, original_filename: str, allowed_tags: list[str],
-                endpoint: Optional[dict] = None) -> Session:
+                endpoint: Optional[dict] = None,
+                custom_terms: Optional[list[tuple[str, str]]] = None) -> Session:
     sid = new_session_id()
     ep = endpoint or endpoints_mod.get_active() or {}
     sess = Session(
@@ -61,6 +64,7 @@ def new_session(upload_path: Path, original_filename: str, allowed_tags: list[st
         original_filename=original_filename,
         endpoint=ep,
         allowed_tags=allowed_tags,
+        custom_terms=custom_terms or [],
     )
     with _SESSIONS_LOCK:
         _SESSIONS[sid] = sess
@@ -78,13 +82,47 @@ def discard_session(sid: str) -> None:
         sess = _SESSIONS.pop(sid, None)
     if not sess:
         return
-    # Best-effort cleanup of the temp upload.
+    cleanup_session_files(sess, remove_output=True)
+    log.info("session discarded: id=%s", sid)
+
+
+def cleanup_session_files(sess: Session, remove_output: bool = False) -> None:
+    """Delete every temp file a session created (CLAUDE.md temp hygiene, H1).
+
+    Runs on every terminal state - success, failure, cancel. Removes the
+    upload, any LibreOffice conversion directory, staged scrub files, and
+    (when `remove_output` is set, i.e. failure/cancel) the output file too.
+    The key file and a verified output are the only artifacts that survive.
+    """
     try:
         if sess.upload_path.exists() and UPLOADS_DIR in sess.upload_path.parents:
             sess.upload_path.unlink()
+            log.info("upload deleted: session=%s", sess.id)
     except OSError as exc:
         log.warning("upload cleanup failed: %s", exc)
-    log.info("session discarded: id=%s", sid)
+
+    # LibreOffice conversion dir (working_path lives in a docanon-conv-* tempdir).
+    if sess.extract and sess.extract.working_path:
+        wp = Path(sess.extract.working_path)
+        if wp != sess.upload_path and wp.parent.name.startswith("docanon-conv-"):
+            shutil.rmtree(wp.parent, ignore_errors=True)
+            log.info("conversion tempdir removed: session=%s", sess.id)
+
+    if sess.output_path:
+        # Staged intermediates from the scrubber, if a crash left them behind.
+        for staged in (sess.output_path.with_suffix(".staged.docx"),
+                       sess.output_path.with_suffix(".staged.xlsx")):
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if remove_output:
+            try:
+                if sess.output_path.exists():
+                    sess.output_path.unlink()
+                    log.info("output removed: session=%s", sess.id)
+            except OSError as exc:
+                log.warning("output cleanup failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -92,12 +130,19 @@ def discard_session(sid: str) -> None:
 # ---------------------------------------------------------------------------
 
 def run_extract_and_detect(sess: Session) -> Session:
-    """Extract text from the upload, then run LLM detection across chunks."""
+    """Extract text from the upload, then run LLM detection across chunks.
+
+    Any failure is terminal: the temp upload (and any conversion dir) is
+    deleted immediately - PII must not linger on disk after a failed run.
+    """
     try:
         sess.extract = extract(sess.upload_path)
     except Exception as exc:  # bubble up clean error to UI
-        sess.error = f"extraction failed: {exc}"
         log.error("session %s extract failed: %s", sess.id, exc)
+        cleanup_session_files(sess)
+        # Set the error last - it is the completion signal the UI polls, and
+        # cleanup must already be done when it appears.
+        sess.error = f"extraction failed: {exc}"
         return sess
 
     def on_chunk(info: dict) -> None:
@@ -111,9 +156,19 @@ def run_extract_and_detect(sess: Session) -> Session:
             endpoint=sess.endpoint,
         )
     except Exception as exc:
-        sess.error = f"detection failed: {exc}"
         log.error("session %s detect failed: %s", sess.id, exc)
+        cleanup_session_files(sess)
+        sess.error = f"detection failed: {exc}"
         return sess
+
+    # Operator-supplied custom terms are guaranteed catches - registered after
+    # detection so an LLM tag on the same text wins (first tag is stable).
+    for tag, term in sess.custom_terms:
+        if term and term in sess.extract.text:
+            try:
+                sess.registry.add(term, tag)
+            except (ValueError, RuntimeError) as exc:
+                log.warning("custom term skipped: tag=%s reason=%s", tag, exc)
 
     sess.detection_complete = True
     counts = sess.registry.counts_per_type()
@@ -135,6 +190,10 @@ def confirm_and_scrub(sess: Session, deselected: Optional[list[str]] = None) -> 
     """
     if sess.registry is None or sess.extract is None:
         sess.error = "session not detected yet"
+        return sess
+    if sess.verify_result is not None:
+        # Already scrubbed - source temp files are gone, nothing to redo.
+        log.warning("session %s confirm ignored: already scrubbed", sess.id)
         return sess
 
     for original in deselected or []:
@@ -163,8 +222,11 @@ def confirm_and_scrub(sess: Session, deselected: Optional[list[str]] = None) -> 
         else:
             result = scrub_text(sess.extract, rmap, out_path)
     except Exception as exc:
-        sess.error = f"scrub failed: {exc}"
         log.error("session %s scrub failed: %s", sess.id, exc)
+        sess.output_path = out_path  # so cleanup can remove partials/staged
+        cleanup_session_files(sess, remove_output=True)
+        sess.output_path = None
+        sess.error = f"scrub failed: {exc}"
         return sess
 
     sess.scrub_steps[-1]["status"] = "done"
@@ -176,12 +238,6 @@ def confirm_and_scrub(sess: Session, deselected: Optional[list[str]] = None) -> 
     sess.scrub_steps.append({"step": "verification scan running", "status": "active"})
     verify = verify_output(result.output_path, rmap)
     sess.scrub_steps[-1]["status"] = "done" if verify.passed else "err"
-    sess.verify_result = {
-        "passed": verify.passed,
-        "map_match_types": verify.map_match_types,
-        "regex_match_types": verify.regex_match_types,
-        "total_matches": verify.total_matches,
-    }
 
     if verify.passed:
         sess.scrub_steps.append({"step": "output ready", "status": "done"})
@@ -192,8 +248,21 @@ def confirm_and_scrub(sess: Session, deselected: Optional[list[str]] = None) -> 
             pii_types_scrubbed=sorted(sess.registry.counts_per_type().keys()),
             registry=sess.registry,
         )
+        # Success: the upload (and any conversion dir) has served its purpose.
+        cleanup_session_files(sess)
     else:
         sess.scrub_steps.append({"step": "output blocked - verification failed", "status": "err"})
+        # The failed output still contains PII by definition - quarantine it.
+        cleanup_session_files(sess, remove_output=True)
+
+    # Set last - verify_result is the completion signal the UI polls, and all
+    # cleanup must already be done when it appears.
+    sess.verify_result = {
+        "passed": verify.passed,
+        "map_match_types": verify.map_match_types,
+        "warnings": verify.regex_match_types,
+        "total_matches": verify.total_matches,
+    }
 
     log.info(
         "session %s scrub complete: verified=%s out=%s",

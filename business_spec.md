@@ -1,7 +1,7 @@
 # Business Spec: Doc Anonymizer
 
-**Last updated:** 2026-05-01  
-**Status:** v1 implementation complete - awaiting operator validation
+**Last updated:** 2026-07-17  
+**Status:** v1 implementation complete; web edition added; code review findings in CODE_REVIEW.md pending fixes
 
 ---
 
@@ -69,18 +69,46 @@ v2 targets PDF rebuild with formatting preserved, and in-place PPTX scrubbing.
 
 ---
 
+## Web Edition (added 2026-07-17)
+
+A second delivery channel: `web/index.html`, a single static page deployable to
+Netlify. It exists for the case where the operator is away from the machine
+running the local LLM but still needs to anonymize before pasting into a
+public LLM.
+
+The privacy guarantee holds by construction: the page is static, all
+processing happens inside the browser tab, and the deploy's security policy
+(connect-src 'none') makes network calls from the page impossible. The
+document never leaves the device.
+
+Differences from the local app, accepted as scope:
+
+- Detection is pattern-based (9 categories) plus an operator-supplied custom
+  terms list - not LLM-based. Weaker on names; the custom terms box and the
+  mandatory preview are the compensating controls.
+- Formats: txt, md, csv, docx, xlsx. No PDF.
+- Outputs three artifacts per run: the anonymized file, a human-readable
+  decoder ring (.txt), and a key.json interchangeable with the local app's
+  key files. Either the decoder ring or the key.json drives deanonymize.
+- Verification hard-blocks release only on actual replacement-map residue.
+  Generic pattern residue is a warning, not a dead end.
+
+---
+
 ## Operational Decisions (resolved during implementation)
 
 The PRD listed six open questions. Three are resolved as built; three are deferred to v2.
 
 **Resolved:**
 
-1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after each session ends (success, failure, or cancel). `/output/` and `/keys/` are kept for the operator to manage manually - they are work product, not transient.
-2. **XLSX formulas containing PII.** Flag and warn, do not silently rewrite. The scrubber reports `formula_warnings` to the UI so the operator can decide whether to revise the formula by hand before sharing.
-3. **LLM timeout mid-chunk.** Log the failed chunk and continue. The post-scrub verifier is the safety net - any PII the LLM missed in a failed chunk will surface there, blocking download.
+1. **Auto-cleanup of `/uploads` and `/output`.** `/uploads/` is purged immediately after every terminal state - success, failure, or cancel - along with any LibreOffice conversion temp directory and staged scrub files. An output that fails verification still contains PII, so it is deleted too (quarantined), never left in `/output/`. Verified outputs and `/keys/` are kept - they are work product.
+2. **XLSX formulas containing PII.** The formula cell is not rewritten by the cell pass, but the deep XML pass replaces PII literals inside formula text, and the verifier scans raw sheet XML so formula content can never escape the map scan. `formula_warnings` still surface so the operator can confirm the formula still computes.
+3. **LLM timeout mid-chunk.** Retry the chunk (3 attempts with backoff), then abort the whole run. A skipped chunk would ship PII with no safety net - names and addresses have no regex shape the verifier could catch. The earlier "log and continue" behavior was a privacy hole and is gone.
+4. **False-positive regex matches in verification.** Verification now has two tiers. Any replacement-map original still present anywhere in the output is a hard fail that blocks release and deletes the output. Generic pattern hits (phone-shaped, IP-shaped strings) are warnings shown in the results panel - they cannot block, because any 10-digit invoice number or version string would otherwise dead-end a clean document.
+5. **Operator-added PII terms.** A CUSTOM TERMS box on the anonymize panel takes one term per line (optional `ORG:`-style type prefix). Terms found in the document are guaranteed catches regardless of what the LLM finds. This replaces the deferred highlight-and-tag preview UI with something simpler.
+6. **Endpoint locality.** Enforced server-side, not just in the browser. Saving a non-local endpoint requires an explicit override flag, and every LLM call to a non-local endpoint logs a loud warning.
 
 **Deferred to v2:**
 
-4. Optional AES-encrypted key files at rest.
-5. Whitelist UI for false-positive regex matches in verification (currently any regex hit fails the run; the operator must abort or retry).
-6. Manual highlight-and-tag UI in the preview panel for operator-added PII spans the LLM missed.
+7. Optional AES-encrypted key files at rest.
+8. In-place highlight-and-tag in the preview panel (custom terms cover the need for now).

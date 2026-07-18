@@ -1,16 +1,27 @@
-"""Post-scrub verification (PRD 5.10).
+"""Post-scrub verification (PRD 5.10, policy revised per CODE_REVIEW C1).
 
-Re-extracts text from the output file and scans it twice:
-  1. for any value that appears in the replacement map (any original PII string)
-  2. for a small set of regex patterns that catch common PII shapes
+Two scans over the output:
 
-If anything matches, verification FAILS, the output is not released, and
-the failure is logged with match types only - never the matched values.
+  1. Replacement-map scan - any original PII string still present anywhere in
+     the output is a HARD FAIL. The output is not released. This scan covers
+     both the format-native extraction (what a reader sees) and, for
+     DOCX/XLSX, the raw XML of every part in the archive - so formula
+     literals, alt text, and metadata are checked even when the extractor
+     can't see them.
+
+  2. Regex residue scan - generic shapes (email / phone / SSN / IP / card).
+     These are WARNINGS, not failures. The patterns cannot tell a missed
+     phone number from an invoice number, and a hard gate here dead-ends
+     clean documents (confirmed false positives: any 10-digit number,
+     version strings). Warnings are surfaced to the operator for review.
+
+Logs pass/fail and match types only - never matched values.
 """
 
 from __future__ import annotations
 
 import re
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -21,76 +32,129 @@ from .logging_setup import get_logger
 log = get_logger("verify")
 
 
-# Regex patterns from PRD 5.10. Conservative; the goal is "catch obvious
-# residue" not "perfectly classify". A failure here is a hard stop.
+def _luhn_ok(digits: str) -> bool:
+    total, alt = 0, False
+    for ch in reversed(digits):
+        d = ord(ch) - 48
+        if alt:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+        alt = not alt
+    return total % 10 == 0
+
+
+def _version_like(ip: str) -> bool:
+    """All-single-digit octets read as version strings (1.2.3.4), not hosts."""
+    return all(len(o) == 1 for o in ip.split("."))
+
+
+# Residue patterns. Tightened per CODE_REVIEW C1: phone requires separators,
+# IP octets are range-checked, card candidates must pass Luhn.
 PATTERNS: dict[str, re.Pattern] = {
     "EMAIL":       re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
-    "PHONE":       re.compile(r"(?:\+?\d{1,3}[\s\-]?)?(?:\(?\d{3}\)?[\s\-]?)\d{3}[\s\-]?\d{4}"),
+    "PHONE":       re.compile(r"(?:\+?1[-. ])?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b"),
     "SSN":         re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
-    "IP":          re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),
-    "CREDIT_CARD": re.compile(r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b"),
+    "IP":          re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+                              r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b"),
+    "CREDIT_CARD": re.compile(r"\b(?:\d{4}[\s\-]){3}\d{4}\b|\b\d{15,16}\b"),
 }
+
+_PLACEHOLDER_RE = re.compile(r"\[[A-Z]+_[0-9A-F]{4}\]")
+_TAG_RE = re.compile(r"<[^>]+>")
+_ZIP_SUFFIXES = {".docx", ".xlsx"}
+_TEXT_PART_RE = re.compile(r"\.(xml|rels|txt|vml)$", re.IGNORECASE)
 
 
 @dataclass
 class VerifyResult:
     passed: bool
     map_match_types: list[str] = field(default_factory=list)
-    regex_match_types: list[str] = field(default_factory=list)
-    total_matches: int = 0
+    regex_match_types: list[str] = field(default_factory=list)   # warnings
+    total_matches: int = 0                                       # map matches only
 
 
 def _values_from_map(replacement_map: dict[str, str]) -> Iterable[tuple[str, str]]:
     """Yield (original_value, tag) so we can count types without leaking values."""
     for original, placeholder in replacement_map.items():
-        # placeholder format: [TAG_XXXX]
         body = placeholder.strip("[]")
         tag = body.split("_", 1)[0] if "_" in body else "UNKNOWN"
         yield original, tag
 
 
+def _xml_unescape(s: str) -> str:
+    return (s.replace("&lt;", "<").replace("&gt;", ">")
+             .replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&"))
+
+
+def _deep_zip_text(path: Path) -> str:
+    """Tag-stripped text of every XML part in a DOCX/XLSX archive.
+
+    Tags are replaced with newlines so text from adjacent elements can't fuse
+    into a false match. This catches PII the format-native extractor can't
+    see: formula literals, alt text, metadata fields, stray parts.
+    """
+    chunks: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as zf:
+            for name in zf.namelist():
+                if not _TEXT_PART_RE.search(name):
+                    continue
+                try:
+                    raw = zf.read(name).decode("utf-8")
+                except (UnicodeDecodeError, KeyError):
+                    continue
+                chunks.append(_xml_unescape(_TAG_RE.sub("\n", raw)))
+    except (zipfile.BadZipFile, OSError) as exc:
+        log.warning("deep zip scan unavailable: %s", type(exc).__name__)
+    return "\n".join(chunks)
+
+
 def verify_output(output_path: Path, replacement_map: dict[str, str]) -> VerifyResult:
     """Run the verification pass against the freshly scrubbed file."""
     extracted = extract(output_path)
-    text = extracted.text
+    texts = [extracted.text]
+    if output_path.suffix.lower() in _ZIP_SUFFIXES:
+        texts.append(_deep_zip_text(output_path))
 
     map_match_types: set[str] = set()
     map_total = 0
     for original, tag in _values_from_map(replacement_map):
         if not original:
             continue
-        if original in text:
-            map_match_types.add(tag)
-            map_total += text.count(original)
+        for text in texts:
+            if original in text:
+                map_match_types.add(tag)
+                map_total += text.count(original)
 
+    # Regex residue - warnings only. Strip placeholders first (replaced with a
+    # newline so surrounding digits can't fuse into a false phone/card match).
     regex_match_types: set[str] = set()
-    regex_total = 0
+    scrubbed = _PLACEHOLDER_RE.sub("\n", "\n".join(texts))
     for label, pat in PATTERNS.items():
-        # Skip matches whose entire string IS a placeholder we just installed.
-        # Placeholders look like [TAG_XXXX]; the regex IPs and SSNs would never
-        # land inside one because of the brackets, but emails/phones could
-        # superficially match digits inside placeholders. Strip placeholders
-        # before regex scanning.
-        scrubbed_for_regex = re.sub(r"\[[A-Z]+_[0-9A-F]{4}\]", "", text)
-        for _ in pat.finditer(scrubbed_for_regex):
+        for m in pat.finditer(scrubbed):
+            v = m.group(0)
+            if label == "IP" and _version_like(v):
+                continue
+            if label == "CREDIT_CARD" and not _luhn_ok(re.sub(r"\D", "", v)):
+                continue
             regex_match_types.add(label)
-            regex_total += 1
-            break  # one hit is enough to flag the type
+            break  # one hit flags the type
 
-    total = map_total + regex_total
-    passed = total == 0
+    passed = map_total == 0
 
     log.info(
-        "verify result: passed=%s map_types=%s regex_types=%s total_matches=%d",
+        "verify result: passed=%s map_types=%s warnings=%s map_matches=%d",
         passed,
         ",".join(sorted(map_match_types)) or "-",
         ",".join(sorted(regex_match_types)) or "-",
-        total,
+        map_total,
     )
 
     return VerifyResult(
         passed=passed,
         map_match_types=sorted(map_match_types),
         regex_match_types=sorted(regex_match_types),
-        total_matches=total,
+        total_matches=map_total,
     )

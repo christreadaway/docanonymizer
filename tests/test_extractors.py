@@ -104,3 +104,42 @@ def test_extract_unsupported_raises(tmp_path):
     p = _write(tmp_path, "x.foo", b"data")
     with pytest.raises(ExtractError):
         extract(p)
+
+
+def test_docx_textbox_text_is_extracted_and_scrubbed(tmp_path):
+    """CODE_REVIEW M5: PII living only inside a text box must reach detection
+    (extraction) and be removed by the scrub."""
+    import zipfile
+    from docx import Document
+    from app.extractors import extract
+    from app.scrubber import scrub_docx
+
+    src = tmp_path / "box.docx"
+    doc = Document()
+    doc.add_paragraph("Body text only.")
+    doc.save(str(src))
+
+    # Inject a text box holding a name into document.xml.
+    with zipfile.ZipFile(src) as zin:
+        parts = {n: zin.read(n) for n in zin.namelist()}
+    xml = parts["word/document.xml"].decode("utf-8")
+    box = (
+        "<w:txbxContent><w:p><w:r><w:t>Maria Gonzalez</w:t></w:r></w:p></w:txbxContent>"
+    )
+    parts["word/document.xml"] = xml.replace("</w:body>", box + "</w:body>").encode("utf-8")
+    boxed = tmp_path / "boxed.docx"
+    with zipfile.ZipFile(boxed, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in parts.items():
+            zout.writestr(name, data)
+
+    # 1. Extraction sees the text box content.
+    extracted = extract(boxed)
+    assert "Maria Gonzalez" in extracted.text
+
+    # 2. Scrub removes it everywhere in the archive.
+    out = tmp_path / "boxed_anon.docx"
+    scrub_docx(boxed, {"Maria Gonzalez": "[PERSON_CCCC]"}, out)
+    with zipfile.ZipFile(out) as zf:
+        body = zf.read("word/document.xml").decode("utf-8")
+    assert "Maria Gonzalez" not in body
+    assert "[PERSON_CCCC]" in body

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
+import time
 
 import pytest
 
@@ -24,3 +26,11 @@ def isolated_root(tmp_path, monkeypatch):
             del sys.modules[mod]
 
     yield tmp_path
+
+    # Pipeline workers run in daemon threads. Let stragglers finish before the
+    # next test tears down / reloads the app modules under them.
+    main = threading.main_thread()
+    deadline = time.monotonic() + 2.0
+    for t in threading.enumerate():
+        if t is not main and t.daemon and t.is_alive():
+            t.join(timeout=max(0.0, deadline - time.monotonic()))

@@ -281,3 +281,172 @@ Plus a Playwright live UI smoke run with a stand-in mock Ollama on port 11434 (a
 ### Next Steps
 
 - Operator's call: should there be an option to *only* render to screen and skip the file output entirely? The trade-off is the deep-scrub / verification guarantee. Current call is "always build and verify a file even if the operator only wants screen text" because skipping it would mean inventing a parallel verification path. Easy to reconsider if the operator wants pure-text-only as a faster path for trusted small docs.
+
+---
+
+## 2026-07-17 - Deep code review + web edition (Netlify)
+
+### What was built or changed
+
+1. **`CODE_REVIEW.md`** - full line-by-line review of the v1.3 codebase.
+   Three critical findings, all confirmed with repro scripts:
+   - C1: verifier regex false positives (any 10-digit number, any dotted-quad)
+     permanently block clean output with no override path
+   - C2: a failed LLM chunk is silently skipped and detection reports complete -
+     PII in that chunk ships unscrubbed if it has no rigid format
+   - C3: PII split across DOCX runs ("Ja" + "ne Smith") survives both scrub
+     passes; the verifier catches it but the user gets a dead end
+   Plus high findings on temp-file hygiene (uploads survive failures,
+   LibreOffice conversions leak to /tmp), server-side endpoint locality not
+   enforced, and XLSX formula results invisible to the verifier. Two of these
+   contradict what business_spec.md claims - flagged as spec drift in the doc.
+   Existing suite still 61/61 passing.
+
+2. **`web/index.html`** - the web edition. One self-contained file, no
+   frameworks, no CDNs, no build step. Runs entirely in the browser tab:
+   - Anonymize: drop .txt/.md/.csv/.docx/.xlsx, pick PII categories (9 regex
+     detectors + custom terms box), preview with click-to-reject, then three
+     outputs: anonymized file, human-readable decoder ring .txt, and a
+     key.json that is schema-compatible with the local app's key files
+   - Deanonymize: drop the anonymized doc + either the key.json or the
+     decoder ring .txt, get the restored file
+   - Own minimal ZIP reader/writer (browser-native DecompressionStream, STORE
+     output) so DOCX/XLSX need no libraries
+   - DOCX replacement is paragraph-aware across runs - it handles the
+     split-run case the local app fails on (C3). Worth porting back.
+   - Verification gates downloads: map residue is a hard block, generic regex
+     residue is a warning only (the C1 lesson applied)
+
+3. **`netlify.toml`** - publishes `web/`, sets CSP with connect-src 'none' so
+   the deployed page cannot make network calls even in principle.
+
+4. README: web edition section with deploy instructions. Business spec:
+   web edition scope added.
+
+### Decisions made
+
+- **Web edition is 100% client-side.** A server-based deploy would mean
+  uploading documents to Netlify, which the privacy mandate forbids. Static
+  hosting + in-browser processing keeps the guarantee: the document never
+  leaves the user's device, enforced by CSP rather than promised by policy.
+- **Regex detection instead of LLM in the browser.** No local LLM is reachable
+  from a hosted page. Compensated with the custom-terms box (deterministic
+  catches for known names) and the mandatory preview.
+- **Decoder ring is a separate human-readable .txt** in addition to key.json,
+  per the product request. Both round-trip; the deanonymizer accepts either.
+- **Web verification only hard-fails on map residue.** Generic pattern hits
+  are surfaced as warnings, so clean documents with invoice numbers or version
+  strings are not dead-ended (the C1 bug avoided by design).
+
+### Tests run
+
+- Backend: pytest 61/61 passing (unchanged).
+- Web: Playwright against real Chromium - 30 checks passing. TXT round trip
+  byte-identical via both key.json and decoder ring; DOCX with split runs,
+  header, table, and bold formatting anonymized, validated by python-docx,
+  restored text identical to original; XLSX cells replaced and restored,
+  validated by openpyxl; false-positive guards verified (invoice number and
+  version string untouched); web key.json loads under the backend's
+  load_key_file schema.
+
+### Open issues / known limitations
+
+- Web PERSON/ADDRESS detection is heuristic. It will miss unusual names and
+  flag some capitalized phrases - the preview and custom terms are the
+  mitigations. Not a substitute for the local LLM path on sensitive docs.
+- Web edition does not read PDFs (no in-browser extractor without a heavy
+  library). PDF users should use the local app.
+- XLSX numeric-typed cells (an SSN stored as a raw number) are not detected
+  in the web edition; text cells are.
+- The three critical backend findings in CODE_REVIEW.md are documented but
+  NOT yet fixed - that is the next work item.
+
+### Next steps
+
+1. Fix C1, C2, C3 in the local app (C3 can port the web edition's
+   paragraph-aware replacement).
+2. H1 temp-file cleanup to match what business_spec.md already promises.
+3. Deploy `web/` to Netlify (operator action - see README).
+
+---
+
+## 2026-07-17 (later) - Local app hardened; direction confirmed local-first
+
+Operator direction mid-session - deploy stays local. The local Flask app IS
+the browser experience (run it on the Mac, use it at localhost:5000), so all
+robustness work landed there. The web/ folder remains in the repo as an
+optional extra but nothing depends on deploying it.
+
+### What was built or changed
+
+Every critical and high finding from CODE_REVIEW.md is fixed, plus most
+mediums and the low-hanging lows:
+
+- **C1 verifier policy.** Map residue (actual detected PII still present)
+  hard-fails and blocks release. Generic regex hits are warnings shown in the
+  results panel - clean documents with invoice numbers or version strings are
+  no longer dead-ended. Patterns tightened: phones need separators, IP octets
+  range-checked and version-like strings skipped, card numbers Luhn-checked.
+- **C2 chunk failures.** Each chunk retries 3x with backoff, then the whole
+  run aborts with a clear error. No more silent skips. Upload is deleted on
+  abort. business_spec decision 3 rewritten to match.
+- **C3 split runs.** New run-aware XML replacement pass (ported from the web
+  edition) joins each paragraph's text runs, finds matches across run
+  boundaries, and writes placeholders back preserving formatting. Applied to
+  DOCX body/headers/footers/footnotes/endnotes/comments and XLSX shared
+  strings and inline strings.
+- **H1 temp hygiene.** cleanup_session_files() runs on every terminal state:
+  uploads, LibreOffice conversion tempdirs, staged files, and failed outputs
+  (quarantine - a failed-verify output still contains PII) are all deleted.
+  Completion signals (error / verify_result) are set only after cleanup so
+  the UI never observes a half-cleaned state. Unanonymize cleans its
+  conversion dirs too and no longer overwrites earlier restores.
+- **H2 endpoint locality.** Server rejects non-local endpoint URLs unless the
+  payload carries allow_nonlocal=true; the browser sets that flag only after
+  an explicit confirm. Every LLM call to a non-local endpoint logs a loud
+  warning.
+- **H3 formula blindness.** Verifier now also scans the raw XML of every part
+  in DOCX/XLSX outputs (tags stripped), so formula literals, alt text, and
+  metadata can never escape the map scan.
+- **M1** stable placeholders (first tag wins, extra tags recorded on the
+  entity). **M2** preview spans claim non-overlapping regions longest-first.
+  **M3** registry listing in prompts capped at 40 entities. **M4** comments
+  parts emptied instead of dropped, comment anchors stripped from
+  document.xml. **M5** extraction now reads footnotes/endnotes/text boxes, so
+  PII there reaches detection. **M6** image-only PDFs error clearly instead
+  of releasing an empty "verified" output.
+- **Custom terms in the local UI.** Textarea on the anonymize panel, one term
+  per line, optional TAG: prefix. Terms present in the document are
+  guaranteed catches even if the LLM misses them.
+- Frontend: dropzone listener leak fixed (event delegation, bound once),
+  endpoint/github rows no longer inject via innerHTML, results panel shows
+  verification warnings distinctly from failures.
+
+### Tests run
+
+- Backend suite grown 61 -> 76, all passing across repeated runs. New
+  coverage: verifier warning policy + false-positive repro, deep XML formula
+  scan, split-run DOCX scrub with formatting check, detector retry + abort,
+  temp hygiene on success/failure/cancel, output quarantine, double-confirm
+  no-op, custom terms, non-local endpoint guard, stable tags, text box
+  extraction + scrub.
+- Live browser end-to-end (Playwright + real Flask + mock Ollama): 13 checks
+  passing - custom terms flow, no false-positive block, downloads, on-screen
+  text, byte-identical unanonymize round trip, uploads/ empty after run,
+  non-local endpoint refused after declining the warning. Log verified free
+  of PII values afterward.
+- Fixed a test-suite flake: pipeline worker threads could outlive their test;
+  completion signals now set after cleanup and conftest joins stragglers.
+
+### Open issues
+
+- Sessions never expire from server memory (fine for a single-user local
+  tool; restart clears).
+- /api/unanonymize/download/<name> serves any file in output/ by name.
+- PPTX rebuild and PDF format-preserving output remain v2 scope.
+
+### Next steps
+
+1. Operator validation run on real documents with the local LLM.
+2. Consider porting the run-aware pass to PPTX slide XML when PPTX rebuild
+   lands in v2.

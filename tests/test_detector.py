@@ -52,8 +52,9 @@ def test_detect_pii_uses_llm_call_and_builds_registry():
     assert len(hex_ids) == 1
 
 
-def test_detector_recovers_from_llm_error():
-    """A single failing chunk should not abort the whole pass."""
+def test_detector_retries_transient_llm_error():
+    """A transient chunk failure is retried and the run completes."""
+    from unittest.mock import patch as _patch
     from app import detector
 
     call_count = {"n": 0}
@@ -64,12 +65,38 @@ def test_detector_recovers_from_llm_error():
             raise detector.llm.LLMError("boom")
         return json.dumps([{"text": "Jane Smith", "type": "PERSON"}])
 
-    with patch.object(detector.llm, "llm_call", side_effect=flaky):
+    with patch.object(detector.llm, "llm_call", side_effect=flaky), \
+         _patch.object(detector.time, "sleep"):
         with patch.object(detector.endpoints_mod, "get_active",
                           return_value={"chunk_tokens": 200, "api_style": "ollama",
                                         "base_url": "http://localhost:1", "model": "m",
                                         "nickname": "test"}):
-            # Force chunking by handing in big text
             r = detector.detect_pii("Jane Smith. " * 1000)
-    # After the first chunk fails, subsequent chunks still produce output.
     assert r.total_replacements() >= 1
+    assert call_count["n"] >= 2  # the failed attempt was retried
+
+
+def test_detector_aborts_when_chunk_permanently_fails():
+    """CODE_REVIEW C2: an unscannable chunk must fail the run, never skip.
+
+    Silently skipping a chunk means PII in it ships unscrubbed - names and
+    addresses have no regex safety net.
+    """
+    import pytest
+    from unittest.mock import patch as _patch
+    from app import detector
+
+    def always_fail(*args, **kwargs):
+        raise detector.llm.LLMError("endpoint down")
+
+    progress = []
+    with patch.object(detector.llm, "llm_call", side_effect=always_fail), \
+         _patch.object(detector.time, "sleep"):
+        with patch.object(detector.endpoints_mod, "get_active",
+                          return_value={"chunk_tokens": 2000, "api_style": "ollama",
+                                        "base_url": "http://localhost:1", "model": "m",
+                                        "nickname": "test"}):
+            with pytest.raises(detector.llm.LLMError, match="could not be scanned"):
+                detector.detect_pii("Jane Smith met Bob.", on_chunk=progress.append)
+    # The chunk error was surfaced to the progress stream before aborting.
+    assert any(p.get("error") for p in progress)

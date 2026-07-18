@@ -1,0 +1,14 @@
+# Doc Anonymizer - web edition. Static single-page app, no build step.
+# The CSP below enforces the privacy promise at the platform level:
+# connect-src 'none' means the page cannot phone home even if a bug tried to.
+
+[build]
+  publish = "web"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
